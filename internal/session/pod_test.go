@@ -12,7 +12,6 @@ import (
 	"github.com/nixieboluo/sealos-stroage-manager/internal/state"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -133,8 +132,4 @@ func testConfig() config.Config {
 
 func fixedNow() time.Time {
 	return time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
-}
-
-func runtimeObjects(objects ...runtime.Object) []runtime.Object {
-	return objects
 }

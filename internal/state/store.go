@@ -177,7 +177,7 @@ func (s *Store) PurgeExpired(now time.Time) []ExpiredItem {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	expired := []ExpiredItem{}
+	expired := make([]ExpiredItem, 0, 4)
 	expired = append(expired, purgeCacheLocked("pod_session", s.podSessions, now)...)
 	viewerExpired := purgeCacheLocked("viewer_session", s.viewerSessions, now)
 	expired = append(expired, viewerExpired...)

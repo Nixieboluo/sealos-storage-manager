@@ -103,7 +103,7 @@ func LoadFile(path string) (Config, error) {
 		path = DefaultPath
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // Config path is an explicit local/deployment input, not user-supplied request data.
 	if err != nil {
 		return Config{}, fmt.Errorf("reading config file: %w", err)
 	}

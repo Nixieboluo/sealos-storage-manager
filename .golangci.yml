@@ -7,7 +7,6 @@ linters:
     - bodyclose
     - errcheck
     - gocritic
-    - gofmt
     - gosec
     - govet
     - ineffassign

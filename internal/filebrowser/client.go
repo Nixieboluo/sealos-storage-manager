@@ -32,7 +32,7 @@ func NewClient(timeout time.Duration) *Client {
 }
 
 func (c *Client) Login(ctx context.Context, viewerURL string, username string, password string) (string, error) {
-	body, err := json.Marshal(LoginRequest{Username: username, Password: password})
+	body, err := json.Marshal(LoginRequest{Username: username, Password: password}) //nolint:gosec // File Browser login API requires a password field; caller supplies a one-time short-TTL secret.
 	if err != nil {
 		return "", fmt.Errorf("encoding filebrowser login request: %w", err)
 	}
@@ -50,7 +50,9 @@ func (c *Client) Login(ctx context.Context, viewerURL string, username string, p
 	if err != nil {
 		return "", fmt.Errorf("calling filebrowser login: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("filebrowser login returned status %d", resp.StatusCode)
