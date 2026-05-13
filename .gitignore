@@ -2,6 +2,8 @@ kubeconfig.test.yaml
 *.kubeconfig
 *.kubeconfig.yaml
 *.kubeconfig.yml
+kubeconfig.*.yaml
+kubeconfig.*.yml
 config/viewer.yaml
 config/*.local.yaml
 coverage.out

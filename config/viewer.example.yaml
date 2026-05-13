@@ -1,6 +1,11 @@
 server:
   config_path: config/viewer.yaml
 
+kubernetes:
+  # Empty means use the in-cluster ServiceAccount. Local integration tests may
+  # point this at an ignored temporary kubeconfig.
+  management_kubeconfig_path: ""
+
 viewer:
   namespace_allowlist: []
   backend_verify_url: https://storage-manager.example.com/internal/filebrowser-hook/verify

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nixieboluo/sealos-stroage-manager/internal/authn"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/config"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/observability"
@@ -56,7 +57,11 @@ func (f *fakeViewerService) CreateViewerSession(
 	return f.created, nil
 }
 
-func (f *fakeViewerService) GetViewerSession(ctx context.Context, id string) (*domain.ViewerSession, error) {
+func (f *fakeViewerService) GetViewerSession(
+	ctx context.Context,
+	id string,
+	userID string,
+) (*domain.ViewerSession, error) {
 	return f.created, nil
 }
 
@@ -64,11 +69,11 @@ func (f *fakeViewerService) IssueToken(ctx context.Context, id string, userID st
 	return f.token, nil
 }
 
-func (f *fakeViewerService) Heartbeat(id string) (*domain.Heartbeat, error) {
+func (f *fakeViewerService) HeartbeatForUser(id string, userID string) (*domain.Heartbeat, error) {
 	return f.heartbeat, nil
 }
 
-func (f *fakeViewerService) CloseViewerSession(id string) (*domain.ViewerSession, error) {
+func (f *fakeViewerService) CloseViewerSessionForUser(id string, userID string) (*domain.ViewerSession, error) {
 	return f.closed, nil
 }
 
@@ -92,6 +97,21 @@ func (f fakeAuthService) VerifyHook(input session.HookVerifyInput) domain.FileBr
 	return f.result
 }
 
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) CanListPVCs(ctx context.Context, principal *authn.Principal, namespace string) error {
+	return nil
+}
+
+func (allowAuthorizer) CanGetPVC(
+	ctx context.Context,
+	principal *authn.Principal,
+	namespace string,
+	name string,
+) error {
+	return nil
+}
+
 func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -102,6 +122,7 @@ func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
 		fakePodService{},
 		fakeAuthService{},
 		observability.New(testObservability(), nil),
+		allowAuthorizer{},
 	)
 	req := httptest.NewRequest(http.MethodGet, "/api/pvcs?namespace=ns", nil)
 	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
@@ -138,6 +159,7 @@ func TestHandlerIssueTokenNoStore(t *testing.T) {
 		fakePodService{},
 		fakeAuthService{},
 		observability.New(testObservability(), nil),
+		allowAuthorizer{},
 	)
 	req := httptest.NewRequest(http.MethodPost, "/api/viewer-sessions/vs_1/token", nil)
 	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
@@ -164,6 +186,7 @@ func TestHandlerVerifyHookReturnsAllowEnvelope(t *testing.T) {
 		fakePodService{},
 		fakeAuthService{result: domain.FileBrowserHookVerification{Allow: true, Scope: "/"}},
 		observability.New(testObservability(), nil),
+		allowAuthorizer{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -180,6 +203,30 @@ func TestHandlerVerifyHookReturnsAllowEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "filebrowser_hook_verification") {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerMetricsReturnsPrometheusText(t *testing.T) {
+	t.Parallel()
+
+	recorder := observability.New(testObservability(), nil)
+	recorder.Metrics().ViewerCreated.Add(1)
+	handler := NewHandler(
+		&fakeViewerService{},
+		fakePodService{},
+		fakeAuthService{},
+		recorder,
+		allowAuthorizer{},
+	)
+	response := httptest.NewRecorder()
+
+	handler.Metrics(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "viewer_sessions_created_total 1") {
+		t.Fatalf("metrics = %s", response.Body.String())
 	}
 }
 

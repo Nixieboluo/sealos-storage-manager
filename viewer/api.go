@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/nixieboluo/sealos-stroage-manager/internal/authn"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/session"
 )
@@ -55,6 +56,11 @@ func VerifyFileBrowserHook(w http.ResponseWriter, req *http.Request) {
 	runtimeHandler().VerifyFileBrowserHook(w, req)
 }
 
+//encore:api public raw method=GET path=/metrics
+func Metrics(w http.ResponseWriter, req *http.Request) {
+	runtimeHandler().Metrics(w, req)
+}
+
 type unavailableViewerService struct{}
 
 func (unavailableViewerService) ListPVCs(ctx context.Context, namespace string) ([]domain.PVC, error) {
@@ -68,7 +74,11 @@ func (unavailableViewerService) CreateViewerSession(
 	return nil, errRuntimeUnavailable
 }
 
-func (unavailableViewerService) GetViewerSession(ctx context.Context, id string) (*domain.ViewerSession, error) {
+func (unavailableViewerService) GetViewerSession(
+	ctx context.Context,
+	id string,
+	userID string,
+) (*domain.ViewerSession, error) {
 	return nil, errRuntimeUnavailable
 }
 
@@ -76,11 +86,11 @@ func (unavailableViewerService) IssueToken(ctx context.Context, id string, userI
 	return nil, errRuntimeUnavailable
 }
 
-func (unavailableViewerService) Heartbeat(id string) (*domain.Heartbeat, error) {
+func (unavailableViewerService) HeartbeatForUser(id string, userID string) (*domain.Heartbeat, error) {
 	return nil, errRuntimeUnavailable
 }
 
-func (unavailableViewerService) CloseViewerSession(id string) (*domain.ViewerSession, error) {
+func (unavailableViewerService) CloseViewerSessionForUser(id string, userID string) (*domain.ViewerSession, error) {
 	return nil, errRuntimeUnavailable
 }
 
@@ -102,4 +112,19 @@ func (unavailableAuthService) VerifyHook(input session.HookVerifyInput) domain.F
 		Reason: errRuntimeUnavailable.Error(),
 		Scope:  "/",
 	}
+}
+
+type denyAuthorizer struct{}
+
+func (denyAuthorizer) CanListPVCs(ctx context.Context, principal *authn.Principal, namespace string) error {
+	return errRuntimeUnavailable
+}
+
+func (denyAuthorizer) CanGetPVC(
+	ctx context.Context,
+	principal *authn.Principal,
+	namespace string,
+	name string,
+) error {
+	return errRuntimeUnavailable
 }

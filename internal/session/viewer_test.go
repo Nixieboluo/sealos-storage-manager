@@ -90,12 +90,43 @@ func TestHeartbeatExtendsSession(t *testing.T) {
 		ExpiresAt:    fixedNow().Add(cfg.Sessions.ViewerSessionTimout),
 	})
 
-	heartbeat, err := service.Heartbeat("vs_1")
+	heartbeat, err := service.HeartbeatForUser("vs_1", "")
 	if err != nil {
 		t.Fatalf("Heartbeat() error = %v", err)
 	}
 	if !heartbeat.ExpiresAt.After(fixedNow()) {
 		t.Fatalf("heartbeat = %#v", heartbeat)
+	}
+}
+
+func TestViewerServiceRejectsCrossUserSessionAccess(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	store := state.New(cfg.Cache)
+	service := NewViewerService(
+		cfg,
+		store,
+		kube.New(fake.NewSimpleClientset()),
+		nil,
+		nil,
+		observability.New(cfg.Observability, nil),
+	)
+	store.PutViewerSession(&domain.ViewerSession{
+		ID:           "vs_1",
+		UserID:       "owner",
+		PodSessionID: "ps_1",
+		ExpiresAt:    fixedNow().Add(cfg.Sessions.ViewerSessionTimout),
+	})
+
+	if _, err := service.GetViewerSession(context.Background(), "vs_1", "other"); err == nil {
+		t.Fatal("GetViewerSession() allowed another user")
+	}
+	if _, err := service.HeartbeatForUser("vs_1", "other"); err == nil {
+		t.Fatal("HeartbeatForUser() allowed another user")
+	}
+	if _, err := service.CloseViewerSessionForUser("vs_1", "other"); err == nil {
+		t.Fatal("CloseViewerSessionForUser() allowed another user")
 	}
 }
 

@@ -150,17 +150,22 @@ func (s *ViewerService) CreateViewerSession(
 	return viewer, nil
 }
 
-func (s *ViewerService) GetViewerSession(ctx context.Context, id string) (*domain.ViewerSession, error) {
+func (s *ViewerService) GetViewerSession(ctx context.Context, id string, userID string) (*domain.ViewerSession, error) {
 	now := s.now()
 	viewer, ok := s.store.GetViewerSession(id, now)
 	if !ok {
 		return nil, apienv.NewError(404, apienv.CodeViewerSessionNotFound, "Viewer session no longer exists", nil)
 	}
+	if viewer.UserID != userID {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Viewer session belongs to another user", nil)
+	}
 	pod, ok := s.store.GetPodSession(viewer.PodSessionID, now)
 	if ok {
-		synced, err := s.pods.SyncPodStatus(ctx, pod)
-		if err == nil {
-			pod = synced
+		if s.pods != nil {
+			synced, err := s.pods.SyncPodStatus(ctx, pod)
+			if err == nil {
+				pod = synced
+			}
 		}
 		viewer.PodStatus = pod.Status
 		viewer.Status = statusFromPod(pod.Status)
@@ -190,10 +195,17 @@ func (s *ViewerService) IssueToken(ctx context.Context, id string, userID string
 }
 
 func (s *ViewerService) Heartbeat(id string) (*domain.Heartbeat, error) {
+	return s.HeartbeatForUser(id, "")
+}
+
+func (s *ViewerService) HeartbeatForUser(id string, userID string) (*domain.Heartbeat, error) {
 	now := s.now()
 	viewer, ok := s.store.GetViewerSession(id, now)
 	if !ok {
 		return nil, apienv.NewError(404, apienv.CodeViewerSessionNotFound, "Viewer session no longer exists", nil)
+	}
+	if userID != "" && viewer.UserID != userID {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Viewer session belongs to another user", nil)
 	}
 	viewer.LastHeartbeatAt = now
 	viewer.ExpiresAt = now.Add(s.cfg.Sessions.ViewerSessionTimout)
@@ -212,10 +224,17 @@ func (s *ViewerService) Heartbeat(id string) (*domain.Heartbeat, error) {
 }
 
 func (s *ViewerService) CloseViewerSession(id string) (*domain.ViewerSession, error) {
+	return s.CloseViewerSessionForUser(id, "")
+}
+
+func (s *ViewerService) CloseViewerSessionForUser(id string, userID string) (*domain.ViewerSession, error) {
 	now := s.now()
 	viewer, ok := s.store.GetViewerSession(id, now)
 	if !ok {
 		return nil, apienv.NewError(404, apienv.CodeViewerSessionNotFound, "Viewer session no longer exists", nil)
+	}
+	if userID != "" && viewer.UserID != userID {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Viewer session belongs to another user", nil)
 	}
 	viewer.Status = domain.ViewerStatusClosed
 	viewer.ExpiresAt = now

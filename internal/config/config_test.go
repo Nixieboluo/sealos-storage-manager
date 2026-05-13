@@ -10,6 +10,8 @@ func TestLoadAppliesDefaultsAndOverrides(t *testing.T) {
 	t.Parallel()
 
 	cfg, err := Load([]byte(`
+kubernetes:
+  management_kubeconfig_path: kubeconfig.test.yaml
 viewer:
   filebrowser:
     image: custom/filebrowser:v1
@@ -22,6 +24,9 @@ observability:
 	}
 	if cfg.Viewer.FileBrowser.Image != "custom/filebrowser:v1" {
 		t.Fatalf("image = %q", cfg.Viewer.FileBrowser.Image)
+	}
+	if cfg.Kubernetes.ManagementKubeconfigPath != "kubeconfig.test.yaml" {
+		t.Fatalf("management kubeconfig path = %q", cfg.Kubernetes.ManagementKubeconfigPath)
 	}
 	if cfg.Viewer.FileBrowser.TokenTTL != 15*time.Minute {
 		t.Fatalf("token ttl = %s", cfg.Viewer.FileBrowser.TokenTTL)

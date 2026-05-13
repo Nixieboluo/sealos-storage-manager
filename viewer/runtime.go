@@ -1,10 +1,14 @@
 package viewer
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
+	"encore.dev/cron"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/config"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/filebrowser"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/kube"
@@ -13,9 +17,16 @@ import (
 	"github.com/nixieboluo/sealos-stroage-manager/internal/state"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var runtimeOnce sync.Once
+var runtimeCleanup *session.CleanupService
+var _ = cron.NewJob("viewer-cleanup", cron.JobConfig{
+	Title:    "Clean up idle File Browser viewer sessions",
+	Every:    1 * cron.Minute,
+	Endpoint: CleanupViewerState,
+})
 
 func runtimeHandler() *Handler {
 	runtimeOnce.Do(func() {
@@ -29,7 +40,7 @@ func runtimeHandler() *Handler {
 	if defaultHandler != nil {
 		return defaultHandler
 	}
-	return NewHandler(unavailableViewerService{}, unavailablePodService{}, unavailableAuthService{}, nil)
+	return NewHandler(unavailableViewerService{}, unavailablePodService{}, unavailableAuthService{}, nil, denyAuthorizer{})
 }
 
 func buildRuntimeHandler() (*Handler, error) {
@@ -37,13 +48,13 @@ func buildRuntimeHandler() (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	restConfig, err := rest.InClusterConfig()
+	restConfig, err := managementRESTConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("building management kubernetes client: %w", err)
 	}
 	recorder := observability.New(cfg.Observability, os.Stdout)
 	store := state.New(cfg.Cache)
@@ -56,5 +67,47 @@ func buildRuntimeHandler() (*Handler, error) {
 		recorder,
 	)
 	viewers := session.NewViewerService(cfg, store, kubeClient, pods, auth, recorder)
-	return NewHandler(viewers, pods, auth, recorder), nil
+	runtimeCleanup = session.NewCleanupService(cfg, store, pods, recorder)
+	return NewHandler(
+		viewers,
+		pods,
+		auth,
+		recorder,
+		kubernetesAuthorizer{},
+	), nil
+}
+
+func managementRESTConfig(cfg config.Config) (*rest.Config, error) {
+	path := cfg.Kubernetes.ManagementKubeconfigPath
+	if path == "" {
+		restConfig, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("loading in-cluster management config: %w", err)
+		}
+		return restConfig, nil
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Clean(path)
+	}
+	restConfig, err := clientcmd.BuildConfigFromFlags("", path)
+	if err != nil {
+		return nil, fmt.Errorf("loading management kubeconfig: %w", err)
+	}
+	return restConfig, nil
+}
+
+//encore:api private
+func CleanupViewerState(ctx context.Context) error {
+	runtimeOnce.Do(func() {
+		handler, err := buildRuntimeHandler()
+		if err != nil {
+			slog.Error("viewer runtime unavailable", "error", err)
+			return
+		}
+		defaultHandler = handler
+	})
+	if runtimeCleanup == nil {
+		return nil
+	}
+	return runtimeCleanup.RunOnce(ctx)
 }

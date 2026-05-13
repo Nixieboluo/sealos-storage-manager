@@ -3,6 +3,7 @@ package observability
 import (
 	"bytes"
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -29,5 +30,24 @@ func TestObserveHTTPRecordsMetricsAndStructuredLog(t *testing.T) {
 	}
 	if strings.Contains(logLine, "kubeconfig") || strings.Contains(logLine, "token") {
 		t.Fatalf("log leaked sensitive value: %s", logLine)
+	}
+}
+
+func TestWritePrometheusExposesCounters(t *testing.T) {
+	t.Parallel()
+
+	recorder := New(config.ObservabilityConfig{LogLevel: "error"}, nil)
+	recorder.Metrics().HTTPRequests.Add(2)
+	recorder.Metrics().CleanupDeleted.Add(1)
+	response := httptest.NewRecorder()
+
+	recorder.WritePrometheus(response)
+
+	body := response.Body.String()
+	if !strings.Contains(body, "viewer_http_requests_total 2") {
+		t.Fatalf("metrics body missing HTTP count: %s", body)
+	}
+	if !strings.Contains(body, "viewer_cleanup_deleted_total 1") {
+		t.Fatalf("metrics body missing cleanup count: %s", body)
 	}
 }

@@ -15,11 +15,10 @@ import (
 )
 
 type Principal struct {
-	ID            string
-	ContextName   string
-	Namespace     string
-	ClientConfig  *rest.Config
-	RawKubeconfig string
+	ID           string
+	ContextName  string
+	Namespace    string
+	ClientConfig *rest.Config
 }
 
 type contextKey struct{}
@@ -64,11 +63,10 @@ func PrincipalFromAuthorization(header string) (*Principal, error) {
 	}
 
 	return &Principal{
-		ID:            principalID(apiConfig),
-		ContextName:   contextName,
-		Namespace:     namespace,
-		ClientConfig:  restConfig,
-		RawKubeconfig: raw,
+		ID:           principalID(apiConfig),
+		ContextName:  contextName,
+		Namespace:    namespace,
+		ClientConfig: restConfig,
 	}, nil
 }
 

@@ -2,8 +2,10 @@ package observability
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -102,4 +104,30 @@ func (r *Recorder) ObserveHTTP(ctx context.Context, method string, route string,
 		slog.Int("status", status),
 		slog.Duration("duration", duration),
 	)
+}
+
+func (r *Recorder) WritePrometheus(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	metrics := r.Metrics()
+	writeMetric(w, "viewer_http_requests_total", "Total HTTP requests.", metrics.HTTPRequests.Load())
+	writeMetric(w, "viewer_http_errors_total", "Total HTTP requests with error status.", metrics.HTTPErrors.Load())
+	writeMetric(w, "viewer_sessions_created_total", "Total viewer sessions created.", metrics.ViewerCreated.Load())
+	writeMetric(w, "viewer_sessions_closed_total", "Total viewer sessions closed or expired.", metrics.ViewerClosed.Load())
+	writeMetric(w, "viewer_pod_sessions_created_total", "Total pod sessions created.", metrics.PodCreated.Load())
+	writeMetric(w, "viewer_pod_sessions_reused_total", "Total pod sessions reused.", metrics.PodReused.Load())
+	writeMetric(w, "viewer_pod_sessions_deleted_total", "Total pod sessions deleted.", metrics.PodDeleted.Load())
+	writeMetric(w, "viewer_auth_requests_created_total", "Total auth requests created.", metrics.AuthCreated.Load())
+	writeMetric(w, "viewer_auth_requests_consumed_total", "Total auth requests consumed.", metrics.AuthConsumed.Load())
+	writeMetric(w, "viewer_auth_requests_denied_total", "Total auth requests denied.", metrics.AuthDenied.Load())
+	writeMetric(w, "viewer_filebrowser_logins_total", "Total successful File Browser logins.", metrics.FileBrowserLogins.Load())
+	writeMetric(w, "viewer_filebrowser_errors_total", "Total File Browser login errors.", metrics.FileBrowserErrors.Load())
+	writeMetric(w, "viewer_kubernetes_requests_total", "Total Kubernetes API requests.", metrics.KubernetesRequests.Load())
+	writeMetric(w, "viewer_kubernetes_errors_total", "Total Kubernetes API request errors.", metrics.KubernetesErrors.Load())
+	writeMetric(w, "viewer_cleanup_deleted_total", "Total resources deleted by cleanup.", metrics.CleanupDeleted.Load())
+}
+
+func writeMetric(w io.Writer, name string, help string, value int64) {
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	_, _ = fmt.Fprintf(w, "# TYPE %s counter\n", name)
+	_, _ = fmt.Fprintf(w, "%s %d\n", name, value)
 }

@@ -14,6 +14,7 @@ const DefaultPath = "config/viewer.yaml"
 
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
+	Kubernetes    KubernetesConfig    `yaml:"kubernetes"`
 	Viewer        ViewerConfig        `yaml:"viewer"`
 	Sessions      SessionsConfig      `yaml:"sessions"`
 	Cache         CacheConfig         `yaml:"cache"`
@@ -23,6 +24,10 @@ type Config struct {
 
 type ServerConfig struct {
 	ConfigPath string `yaml:"config_path"`
+}
+
+type KubernetesConfig struct {
+	ManagementKubeconfigPath string `yaml:"management_kubeconfig_path"`
 }
 
 type ViewerConfig struct {
@@ -132,6 +137,7 @@ func Default() Config {
 		Server: ServerConfig{
 			ConfigPath: DefaultPath,
 		},
+		Kubernetes: KubernetesConfig{},
 		Viewer: ViewerConfig{
 			NamespaceAllowlist: []string{},
 			BackendVerifyURL:   "http://viewer-backend/internal/filebrowser-hook/verify",
@@ -241,7 +247,8 @@ func (cfg Config) Validate() error {
 
 func (cfg Config) Redacted() map[string]any {
 	return map[string]any{
-		"server": cfg.Server,
+		"server":     cfg.Server,
+		"kubernetes": cfg.Kubernetes,
 		"viewer": map[string]any{
 			"namespace_allowlist": cfg.Viewer.NamespaceAllowlist,
 			"backend_verify_url":  cfg.Viewer.BackendVerifyURL,
