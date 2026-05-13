@@ -9,4 +9,5 @@ dist/
 tmp/
 .encore/
 .agents/
+.idea/
 .DS_Store
