@@ -186,6 +186,45 @@ func (s *PodService) ClosePodSession(ctx context.Context, podSessionID string) (
 	return podSession, nil
 }
 
+func (s *PodService) ReconcileViewerPods(ctx context.Context, namespace string) error {
+	pods, err := s.client.ListViewerPods(ctx, namespace, map[string]string{labelComponent: componentViewer})
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	for i := range pods {
+		pod := &pods[i]
+		podSessionID := pod.Labels[labelPodSessionID]
+		if podSessionID == "" {
+			continue
+		}
+		if existing, ok := s.store.GetPodSession(podSessionID, now); ok {
+			_, _ = s.SyncPodStatus(ctx, existing)
+			continue
+		}
+		age := now.Sub(pod.CreationTimestamp.Time)
+		if age <= s.cfg.Sessions.RecoveryGrace {
+			input := EnsurePodSessionInput{
+				Namespace:  pod.Namespace,
+				PVCName:    pod.Labels[labelPVCName],
+				PVCUID:     pod.Labels[labelPVCUID],
+				AccessMode: domain.AccessModeReadWriteMany,
+				Mode:       domain.ModeReadWrite,
+			}
+			session := s.rebuildPodSession(pod, input, now)
+			s.store.PutPodSession(session)
+			continue
+		}
+		if age > s.cfg.Sessions.OrphanGrace {
+			_ = s.client.DeleteIngress(ctx, pod.Namespace, pod.Name)
+			_ = s.client.DeleteService(ctx, pod.Namespace, pod.Name)
+			_ = s.client.DeletePod(ctx, pod.Namespace, pod.Name)
+			s.recorder.Metrics().CleanupDeleted.Add(1)
+		}
+	}
+	return nil
+}
+
 func (s *PodService) findExistingViewerPod(
 	ctx context.Context,
 	namespace string,
