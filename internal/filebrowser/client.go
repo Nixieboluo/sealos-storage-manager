@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -57,17 +58,33 @@ func (c *Client) Login(ctx context.Context, viewerURL string, username string, p
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("filebrowser login returned status %d", resp.StatusCode)
 	}
-	var out LoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("decoding filebrowser login response: %w", err)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("reading filebrowser login response: %w", err)
 	}
-	if out.Token == "" {
+	token, err := loginToken(data)
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
 		return "", fmt.Errorf("filebrowser login response missing token")
 	}
-	return out.Token, nil
+	return token, nil
 }
 
 func HashSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:])
+}
+
+func loginToken(data []byte) (string, error) {
+	var out LoginResponse
+	if err := json.Unmarshal(data, &out); err == nil && out.Token != "" {
+		return out.Token, nil
+	}
+	var token string
+	if err := json.Unmarshal(data, &token); err == nil {
+		return strings.TrimSpace(token), nil
+	}
+	return strings.TrimSpace(string(data)), nil
 }
