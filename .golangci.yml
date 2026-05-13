@@ -1,0 +1,31 @@
+version: "2"
+run:
+  timeout: 5m
+  tests: true
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - gocritic
+    - gofmt
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

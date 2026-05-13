@@ -8,4 +8,5 @@ coverage.out
 dist/
 tmp/
 .encore/
+.agents/
 .DS_Store

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: viewer-backend-config
+  namespace: sealos-storage-manager
+data:
+  viewer.yaml: |
+    # Replace with config/viewer.example.yaml values for the target cluster.
+    viewer: {}

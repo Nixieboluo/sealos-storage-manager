@@ -1,0 +1,58 @@
+server:
+  config_path: config/viewer.yaml
+
+viewer:
+  namespace_allowlist: []
+  backend_verify_url: https://storage-manager.example.com/internal/filebrowser-hook/verify
+  hook_client_token: example-hook-token
+  filebrowser:
+    image: filebrowser/filebrowser:v2.30.0
+    port: 8080
+    token_ttl: 15m
+    login_timeout: 2s
+  pod:
+    service_account_name: ""
+    mount_path: /srv
+    database_path: /tmp/filebrowser.db
+    cpu_request: 50m
+    memory_request: 64Mi
+    cpu_limit: 500m
+    memory_limit: 512Mi
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    class_name: nginx
+    host_template: viewer-{{ .PodSessionID }}.example.com
+    tls_secret_name: ""
+
+sessions:
+  heartbeat_interval: 30s
+  viewer_session_timeout: 90s
+  pod_keepalive_grace: 5m
+  auth_request_ttl: 30s
+  recovery_grace: 3m
+  orphan_grace: 10m
+
+cache:
+  pod_sessions_max_entries: 1024
+  viewer_sessions_max_entries: 4096
+  auth_requests_max_entries: 4096
+  token_records_max_entries: 4096
+  indexes_max_entries: 4096
+  purge_interval: 30s
+  reconcile_interval: 45s
+
+observability:
+  service_name: sealos-storage-manager-viewer
+  metrics_enabled: true
+  metrics_path: /metrics
+  tracing_enabled: true
+  trace_sample_ratio: 1.0
+  otlp_endpoint: ""
+  log_level: info
+
+integration:
+  kubeconfig_path: kubeconfig.test.yaml
+  namespace: default
+  storage_class_name: ""

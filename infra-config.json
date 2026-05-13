@@ -1,0 +1,10 @@
+{
+  "$schema": "https://encore.dev/schemas/infra.schema.json",
+  "metadata": {
+    "app_id": "sealos-storage-manager-viewer",
+    "environment": "self-hosted"
+  },
+  "graceful_shutdown": {
+    "total": 30
+  }
+}
