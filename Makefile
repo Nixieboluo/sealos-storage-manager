@@ -26,7 +26,7 @@ test-race:
 	$(GO) test -race ./...
 
 test-integration:
-	$(GO) test -tags=integration ./... -config $(CONFIG) -count=1
+	$(GO) test -tags=integration ./test/integration -config $(CONFIG) -count=1
 
 security:
 	$(GOVULNCHECK) ./...
