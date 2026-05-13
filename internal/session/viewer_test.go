@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/nixieboluo/sealos-stroage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-stroage-manager/internal/kube"
@@ -14,6 +15,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+type staticLogin struct {
+	token string
+}
+
+func (s staticLogin) Login(ctx context.Context, viewerURL string, username string, password string) (string, error) {
+	return s.token, nil
+}
 
 func TestViewerServiceListPVCs(t *testing.T) {
 	t.Parallel()
@@ -96,6 +105,53 @@ func TestHeartbeatExtendsSession(t *testing.T) {
 	}
 	if !heartbeat.ExpiresAt.After(fixedNow()) {
 		t.Fatalf("heartbeat = %#v", heartbeat)
+	}
+}
+
+func TestIssueTokenSyncsPodStatusBeforeReadinessCheck(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	store := state.New(cfg.Cache)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "viewer-ps-1",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	client := kube.New(fake.NewSimpleClientset(pod))
+	pods := NewPodService(cfg, store, client, observability.New(cfg.Observability, nil))
+	auth := NewAuthService(cfg, store, staticLogin{token: "fb-token"}, observability.New(cfg.Observability, nil))
+	service := NewViewerService(cfg, store, client, pods, auth, observability.New(cfg.Observability, nil))
+	now := fixedNow()
+	service.now = func() time.Time { return now }
+	store.PutPodSession(&domain.PodSession{
+		ID:        "ps_1",
+		Namespace: "default",
+		PodName:   "viewer-ps-1",
+		ViewerURL: "http://viewer.example.test",
+		Status:    domain.PodStatusCreating,
+		ExpiresAt: now.Add(time.Minute),
+	})
+	store.PutViewerSession(&domain.ViewerSession{
+		ID:           "vs_1",
+		UserID:       "owner",
+		PodSessionID: "ps_1",
+		ExpiresAt:    now.Add(time.Minute),
+	})
+
+	token, err := service.IssueToken(context.Background(), "vs_1", "owner")
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
+	if token.Token != "fb-token" {
+		t.Fatalf("token = %#v", token)
 	}
 }
 

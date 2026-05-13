@@ -188,6 +188,12 @@ func (s *ViewerService) IssueToken(ctx context.Context, id string, userID string
 		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Viewer session belongs to another user", nil)
 	}
 	pod, ok := s.store.GetPodSession(viewer.PodSessionID, now)
+	if ok && s.pods != nil {
+		synced, err := s.pods.SyncPodStatus(ctx, pod)
+		if err == nil {
+			pod = synced
+		}
+	}
 	if !ok || pod.Status != domain.PodStatusReady {
 		return nil, apienv.NewError(409, apienv.CodeViewerPodCreating, "Viewer pod is not ready", nil)
 	}
