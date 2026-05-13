@@ -52,6 +52,9 @@ func TestIssueTokenCreatesOneTimeAuthRequestAndTokenRecord(t *testing.T) {
 	if !strings.Contains(login.password, ".") || strings.Contains(login.password, "fb-token") {
 		t.Fatalf("unexpected password format: %q", login.password)
 	}
+	if len(login.password) > 72 {
+		t.Fatalf("password length = %d, exceeds bcrypt limit", len(login.password))
+	}
 }
 
 func TestVerifyHookAllowsAndConsumesAuthRequestOnce(t *testing.T) {

@@ -169,7 +169,7 @@ func deny(reason string) domain.FileBrowserHookVerification {
 }
 
 func randomSecret() (string, error) {
-	var raw [24]byte
+	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("generating auth secret: %w", err)
 	}
