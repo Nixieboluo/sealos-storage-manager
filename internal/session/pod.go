@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -27,6 +28,8 @@ const (
 	labelPodSessionID = "storage-management.sealos.io/pod-session-id"
 	componentViewer   = "viewer"
 )
+
+var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]+`)
 
 type PodService struct {
 	cfg      config.Config
@@ -496,18 +499,28 @@ func (s *PodService) viewerHost(id string) (string, error) {
 		return "", fmt.Errorf("parsing viewer host template: %w", err)
 	}
 	var out bytes.Buffer
-	if err := tmpl.Execute(&out, map[string]string{"PodSessionID": id}); err != nil {
+	if err := tmpl.Execute(&out, map[string]string{"PodSessionID": dnsLabel(id)}); err != nil {
 		return "", fmt.Errorf("executing viewer host template: %w", err)
 	}
 	return out.String(), nil
 }
 
 func resourceName(name string) string {
-	name = strings.ToLower(name)
+	name = dnsLabel(name)
 	if len(name) <= 63 {
 		return name
 	}
 	return name[:63]
+}
+
+func dnsLabel(value string) string {
+	value = strings.ToLower(value)
+	value = dns1123Invalid.ReplaceAllString(value, "-")
+	value = strings.Trim(value, "-")
+	if value == "" {
+		return "viewer"
+	}
+	return value
 }
 
 func resourceList(cpu string, memory string) corev1.ResourceList {

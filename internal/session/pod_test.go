@@ -39,6 +39,9 @@ func TestEnsurePodSessionCreatesResources(t *testing.T) {
 	if podSession.ID == "" || podSession.Status != domain.PodStatusCreating {
 		t.Fatalf("pod session = %#v", podSession)
 	}
+	if strings.Contains(podSession.PodName, "_") || strings.Contains(podSession.ViewerURL, "_") {
+		t.Fatalf("kubernetes resource identifiers must be DNS-safe: pod=%q url=%q", podSession.PodName, podSession.ViewerURL)
+	}
 
 	pod, err := client.GetPod(context.Background(), "default", podSession.PodName)
 	if err != nil {
@@ -144,6 +147,27 @@ func TestFileBrowserHookScriptValidatesGeneratedIDs(t *testing.T) {
 	}
 	if !strings.Contains(fileBrowserHookScript, "printf '{\"pod_session_id\"") {
 		t.Fatal("hook script should build JSON through printf template")
+	}
+}
+
+func TestDNSLabelSanitizesGeneratedSessionID(t *testing.T) {
+	t.Parallel()
+
+	if got := resourceName("viewer-ps_ABC123"); got != "viewer-ps-abc123" {
+		t.Fatalf("resourceName() = %q", got)
+	}
+	service := NewPodService(
+		testConfig(),
+		state.New(testConfig().Cache),
+		kube.New(fake.NewSimpleClientset()),
+		observability.New(testConfig().Observability, nil),
+	)
+	host, err := service.viewerHost("ps_ABC123")
+	if err != nil {
+		t.Fatalf("viewerHost() error = %v", err)
+	}
+	if strings.Contains(host, "_") {
+		t.Fatalf("viewerHost() contains underscore: %q", host)
 	}
 }
 
