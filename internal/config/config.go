@@ -42,6 +42,7 @@ type ViewerConfig struct {
 
 type FileBrowserConfig struct {
 	Image        string        `yaml:"image"`
+	BinaryPath   string        `yaml:"binary_path"`
 	Port         int32         `yaml:"port"`
 	TokenTTL     time.Duration `yaml:"token_ttl"`
 	LoginTimeout time.Duration `yaml:"login_timeout"`
@@ -144,6 +145,7 @@ func Default() Config {
 			HookClientToken:    "",
 			FileBrowser: FileBrowserConfig{
 				Image:        "filebrowser/filebrowser:v2.30.0",
+				BinaryPath:   "/filebrowser",
 				Port:         8080,
 				TokenTTL:     15 * time.Minute,
 				LoginTimeout: 2 * time.Second,
@@ -201,6 +203,9 @@ func (cfg Config) Validate() error {
 	var problems []string
 	if strings.TrimSpace(cfg.Viewer.FileBrowser.Image) == "" {
 		problems = append(problems, "viewer.filebrowser.image is required")
+	}
+	if strings.TrimSpace(cfg.Viewer.FileBrowser.BinaryPath) == "" {
+		problems = append(problems, "viewer.filebrowser.binary_path is required")
 	}
 	if cfg.Viewer.FileBrowser.Port <= 0 {
 		problems = append(problems, "viewer.filebrowser.port must be positive")

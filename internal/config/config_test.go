@@ -25,6 +25,9 @@ observability:
 	if cfg.Viewer.FileBrowser.Image != "custom/filebrowser:v1" {
 		t.Fatalf("image = %q", cfg.Viewer.FileBrowser.Image)
 	}
+	if cfg.Viewer.FileBrowser.BinaryPath != "/filebrowser" {
+		t.Fatalf("binary path = %q", cfg.Viewer.FileBrowser.BinaryPath)
+	}
 	if cfg.Kubernetes.ManagementKubeconfigPath != "kubeconfig.test.yaml" {
 		t.Fatalf("management kubeconfig path = %q", cfg.Kubernetes.ManagementKubeconfigPath)
 	}
@@ -48,6 +51,11 @@ func TestLoadRejectsInvalidConfig(t *testing.T) {
 			name: "missing image",
 			body: "viewer:\n  filebrowser:\n    image: \"\"\n",
 			want: "viewer.filebrowser.image is required",
+		},
+		{
+			name: "missing binary path",
+			body: "viewer:\n  filebrowser:\n    binary_path: \"\"\n",
+			want: "viewer.filebrowser.binary_path is required",
 		},
 		{
 			name: "database inside pvc mount",

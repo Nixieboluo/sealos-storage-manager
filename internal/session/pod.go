@@ -177,6 +177,11 @@ func (s *PodService) SyncPodStatus(ctx context.Context, podSession *domain.PodSe
 		if podReady(pod) {
 			updated.Status = domain.PodStatusReady
 			updated.Reason = ""
+			break
+		}
+		if reason := containerFailureReason(pod); reason != "" {
+			updated.Status = domain.PodStatusFailed
+			updated.Reason = reason
 		}
 	case corev1.PodFailed:
 		updated.Status = domain.PodStatusFailed
@@ -188,6 +193,25 @@ func (s *PodService) SyncPodStatus(ctx context.Context, podSession *domain.PodSe
 	}
 	s.store.PutPodSession(&updated)
 	return &updated, nil
+}
+
+func containerFailureReason(pod *corev1.Pod) string {
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil && status.State.Waiting.Reason != "" {
+			switch status.State.Waiting.Reason {
+			case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError":
+				return status.State.Waiting.Reason
+			}
+		}
+		if status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.ExitCode != 0 {
+			reason := status.LastTerminationState.Terminated.Reason
+			if reason == "" {
+				reason = fmt.Sprintf("ContainerExited%d", status.LastTerminationState.Terminated.ExitCode)
+			}
+			return reason
+		}
+	}
+	return ""
 }
 
 func (s *PodService) ClosePodSession(ctx context.Context, podSessionID string) (*domain.PodSession, error) {
@@ -321,7 +345,7 @@ func (s *PodService) buildPod(session *domain.PodSession, mountInfo *domain.PVCM
 					Image:   s.cfg.Viewer.FileBrowser.Image,
 					Command: []string{"/bin/sh", "-c"},
 					Args: []string{
-						"filebrowser config init " +
+						shellQuote(s.cfg.Viewer.FileBrowser.BinaryPath) + " config init " +
 							"--database " + shellQuote(s.cfg.Viewer.Pod.DatabasePath) + " " +
 							"--root " + shellQuote(s.cfg.Viewer.Pod.MountPath) + " " +
 							"--address 0.0.0.0 " +
@@ -331,7 +355,7 @@ func (s *PodService) buildPod(session *domain.PodSession, mountInfo *domain.PVCM
 							"--auth.header= " +
 							"--token-expiration-time " + shellQuote(s.cfg.Viewer.FileBrowser.TokenTTL.String()) + " " +
 							"--disable-exec " +
-							"&& exec filebrowser " +
+							"&& exec " + shellQuote(s.cfg.Viewer.FileBrowser.BinaryPath) + " " +
 							"--database " + shellQuote(s.cfg.Viewer.Pod.DatabasePath) + " " +
 							"--root " + shellQuote(s.cfg.Viewer.Pod.MountPath) + " " +
 							"--address 0.0.0.0 " +

@@ -56,6 +56,9 @@ func TestEnsurePodSessionCreatesResources(t *testing.T) {
 	if !strings.Contains(pod.Spec.Containers[0].Args[0], "--auth.command=/hooks/filebrowser-auth-hook.sh") {
 		t.Fatalf("filebrowser command did not configure hook auth: %q", pod.Spec.Containers[0].Args[0])
 	}
+	if !strings.Contains(pod.Spec.Containers[0].Args[0], "'/filebrowser' config init") {
+		t.Fatalf("filebrowser command did not use configured binary path: %q", pod.Spec.Containers[0].Args[0])
+	}
 	if pod.Spec.Volumes[0].PersistentVolumeClaim.ReadOnly {
 		t.Fatal("readwrite mode mounted readonly")
 	}
@@ -132,6 +135,49 @@ func TestBuildReadOnlyPod(t *testing.T) {
 	}
 	if !pod.Spec.Containers[0].VolumeMounts[0].ReadOnly {
 		t.Fatal("read-only mode did not set mount readonly")
+	}
+}
+
+func TestSyncPodStatusReportsCrashLoop(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	store := state.New(cfg.Cache)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "viewer-ps-crash",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "filebrowser",
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+					},
+				},
+			},
+		},
+	}
+	service := NewPodService(
+		cfg,
+		store,
+		kube.New(fake.NewSimpleClientset(pod)),
+		observability.New(cfg.Observability, nil),
+	)
+
+	updated, err := service.SyncPodStatus(context.Background(), &domain.PodSession{
+		ID:        "ps_crash",
+		Namespace: "default",
+		PodName:   "viewer-ps-crash",
+		ExpiresAt: fixedNow().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("SyncPodStatus() error = %v", err)
+	}
+	if updated.Status != domain.PodStatusFailed || updated.Reason != "CrashLoopBackOff" {
+		t.Fatalf("updated = %#v", updated)
 	}
 }
 

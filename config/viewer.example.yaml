@@ -12,6 +12,7 @@ viewer:
   hook_client_token: example-hook-token
   filebrowser:
     image: filebrowser/filebrowser:v2.30.0
+    binary_path: /filebrowser
     port: 8080
     token_ttl: 15m
     login_timeout: 2s
