@@ -8,7 +8,7 @@ IMAGE ?= sealos-storage-manager-viewer:dev
 .PHONY: dev fmt fmt-check lint vet test test-race test-integration security build-image verify tidy
 
 dev:
-	$(GO) run ./cmd/viewer-dev -config $(CONFIG) -listen 0.0.0.0:4000
+	ENCORERUNTIME_NOPANIC=1 $(GO) run ./cmd/viewer-dev -config $(CONFIG) -listen 0.0.0.0:4000
 
 fmt:
 	$(GO) fmt ./...
