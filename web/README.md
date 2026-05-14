@@ -1,0 +1,101 @@
+# Sealos Storage Manager Web
+
+Frontend scaffold for the storage manager.
+
+## Stack
+
+- PNPM
+- Vite latest
+- React latest
+- Tailwind CSS latest
+- shadcn/ui component layout
+- TanStack Query, Form, Store, Query Devtools, Form Devtools
+- Encore generated TypeScript SDK
+
+## Commands
+
+```bash
+pnpm install
+pnpm dev
+pnpm lint
+pnpm test
+pnpm test:watch
+pnpm test:ui
+pnpm build
+pnpm check:css
+pnpm generate:api
+```
+
+`pnpm generate:api` writes Encore's generated TypeScript client to
+`src/services/encore/client.ts`.
+
+## Encore Toolbar
+
+The Vite dev server injects Encore's local development toolbar script through
+`vite/encore-toolbar.ts`. The script is prepended to `<head>` during `pnpm dev`
+so it loads before the React bundle, matching Encore's toolbar requirement.
+Production builds do not include the toolbar.
+
+## Chrome 86+ Compatibility
+
+The project intentionally keeps latest frontend packages and treats Chrome 86 as
+the minimum usable browser through build transforms and runtime polyfills:
+
+- `build.target` and `cssTarget` are set to `chrome86`.
+- PostCSS transforms Tailwind v4 output for cascade layers, OKLCH, color-mix,
+  modern selectors, logical properties, nesting, and media query ranges.
+- The compatibility pass also adds fallbacks for independent transform
+  properties, empty CSS variable fallbacks, variable-based `color-mix()`, and
+  OKLab gradient color spaces.
+- Modern progressive CSS guarded by `@supports` can remain when Chrome 86 has a
+  usable fallback declaration before it.
+- `core-js` covers JS runtime gaps not handled by Vite's Chrome 86 syntax target.
+- `container-query-polyfill` and `css-has-pseudo/browser` are loaded in
+  `src/polyfills.ts`.
+- `pnpm check:css` scans the production CSS output for unsupported syntax that
+  should not ship without a Chrome 86 fallback.
+
+Tailwind v4 is still not officially Chrome 86-supported, so avoid relying on
+new CSS that cannot be fully polyfilled, including `field-sizing`,
+`@starting-style`, `transition-behavior: allow-discrete`, `text-wrap: balance`,
+and `scrollbar-gutter`.
+
+The `:where()` fallback is intentionally conservative: it is expanded for
+Chrome 86 compatibility, but its zero-specificity semantics are not perfectly
+preserved. Keep shadcn/Tailwind overrides simple and verify visual regressions
+when adding complex selectors.
+
+## Structure
+
+```text
+src/
+  app/                 app shell and providers
+  assets/              static assets imported by React
+  components/ui/       shadcn/ui primitives
+  config/              environment and app config
+  features/            feature modules
+  hooks/               shared hooks
+  layouts/             route/page layouts
+  pages/               page-level composition
+  services/            API clients and shared service adapters
+  store/               global app stores
+  styles/              Tailwind and global styles
+  types/               shared ambient/project types
+  utils/               shared helpers
+```
+
+Feature modules can own their local `api`, `components`, `forms`, `stores`, and
+`types` folders.
+
+## Testing
+
+Vitest is configured with jsdom and React Testing Library. Shared test setup
+lives in `src/test/setup.ts`, and `src/test/render.tsx` provides a provider-aware
+render helper for integration tests.
+
+Each new feature should ship with:
+
+- Unit tests for pure logic, API query options, stores, validators, and helpers.
+- Integration tests for user-visible React flows that cross components,
+  forms, stores, query state, or SDK adapters.
+- Tests colocated with the feature code using `*.test.ts` or `*.test.tsx`.

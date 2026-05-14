@@ -1,0 +1,71 @@
+{
+	"name": "web",
+	"type": "module",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"dev": "vite",
+		"generate:api": "encore gen client --lang=typescript --output=src/services/encore/client.ts",
+		"build": "tsc -b && vite build",
+		"check:css": "node scripts/check-modern-css.mjs",
+		"lint": "eslint .",
+		"preview": "vite preview",
+		"test": "vitest run",
+		"test:ui": "vitest --ui",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"@radix-ui/react-slot": "^1.2.4",
+		"@tanstack/react-devtools": "^0.10.5",
+		"@tanstack/react-form": "^1.32.0",
+		"@tanstack/react-form-devtools": "^0.2.27",
+		"@tanstack/react-query": "^5.100.10",
+		"@tanstack/react-query-devtools": "^5.100.10",
+		"@tanstack/react-store": "^0.11.0",
+		"@tanstack/store": "^0.11.0",
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"container-query-polyfill": "^1.0.2",
+		"core-js": "^3.49.0",
+		"css-has-pseudo": "^8.0.0",
+		"lucide-react": "^1.14.0",
+		"react": "^19.2.6",
+		"react-dom": "^19.2.6",
+		"tailwind-merge": "^3.6.0"
+	},
+	"devDependencies": {
+		"@antfu/eslint-config": "^9.0.0",
+		"@csstools/postcss-is-pseudo-class": "^6.0.0",
+		"@eslint-react/eslint-plugin": "^5.7.8",
+		"@eslint/js": "^10.0.1",
+		"@tailwindcss/postcss": "^4.3.0",
+		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/react": "^16.3.2",
+		"@testing-library/user-event": "^14.6.1",
+		"@types/node": "^25.7.0",
+		"@types/react": "^19.2.14",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^6.0.1",
+		"@vitest/ui": "^4.1.6",
+		"eslint": "^10.3.0",
+		"eslint-plugin-format": "^2.0.1",
+		"eslint-plugin-react-hooks": "^7.1.1",
+		"eslint-plugin-react-refresh": "^0.5.2",
+		"globals": "^17.6.0",
+		"jsdom": "^29.1.1",
+		"postcss": "^8.5.14",
+		"postcss-preset-env": "^11.3.0",
+		"postcss-value-parser": "^4.2.0",
+		"tailwindcss": "^4.3.0",
+		"tw-animate-css": "^1.4.0",
+		"typescript": "~6.0.2",
+		"typescript-eslint": "^8.59.2",
+		"vite": "^8.0.12",
+		"vitest": "^4.1.6"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"core-js"
+		]
+	}
+}

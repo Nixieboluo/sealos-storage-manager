@@ -1,7 +1,7 @@
 {
   "$schema": "https://encore.dev/schemas/infra.schema.json",
   "metadata": {
-    "app_id": "sealos-storage-manager-viewer",
+    "app_id": "",
     "env_name": "self-hosted",
     "env_type": "production"
   },

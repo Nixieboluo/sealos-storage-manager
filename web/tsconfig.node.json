@@ -1,0 +1,20 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+		"paths": {
+			"@/*": [
+				"./src/*"
+			]
+		},
+		"types": [
+			"node"
+		],
+		"erasableSyntaxOnly": true
+	},
+	"include": [
+		"vite.config.ts",
+		"postcss.config.mjs",
+		"eslint.config.js"
+	]
+}
