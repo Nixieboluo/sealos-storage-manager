@@ -101,3 +101,9 @@ data:
       logs:
         exporter: encore
         level: info
+      traces:
+        exporter: none
+        endpoint: ""
+        sample_ratio: 1
+        batch_timeout: 5s
+        export_timeout: 5s

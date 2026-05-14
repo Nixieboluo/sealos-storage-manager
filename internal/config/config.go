@@ -90,13 +90,22 @@ type CacheConfig struct {
 }
 
 type ObservabilityConfig struct {
-	ServiceName string     `yaml:"service_name"`
-	Logs        LogsConfig `yaml:"logs"`
+	ServiceName string       `yaml:"service_name"`
+	Logs        LogsConfig   `yaml:"logs"`
+	Traces      TracesConfig `yaml:"traces"`
 }
 
 type LogsConfig struct {
 	Exporter string `yaml:"exporter"`
 	Level    string `yaml:"level"`
+}
+
+type TracesConfig struct {
+	Exporter      string        `yaml:"exporter"`
+	Endpoint      string        `yaml:"endpoint"`
+	SampleRatio   float64       `yaml:"sample_ratio"`
+	BatchTimeout  time.Duration `yaml:"batch_timeout"`
+	ExportTimeout time.Duration `yaml:"export_timeout"`
 }
 
 type IntegrationConfig struct {
@@ -166,6 +175,12 @@ func Default() Config {
 			Logs: LogsConfig{
 				Exporter: "encore",
 				Level:    "info",
+			},
+			Traces: TracesConfig{
+				Exporter:      "none",
+				SampleRatio:   1,
+				BatchTimeout:  5 * time.Second,
+				ExportTimeout: 5 * time.Second,
 			},
 		},
 		Integration: IntegrationConfig{
@@ -265,10 +280,34 @@ func (cfg Config) Validate() error {
 	default:
 		problems = append(problems, "observability.logs.level must be one of debug, info, warn, error")
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Observability.Traces.Exporter)) {
+	case "":
+		problems = append(problems, "observability.traces.exporter is required")
+	case "none", "discard", "otlp":
+	default:
+		problems = append(problems, "observability.traces.exporter must be one of otlp, discard, none")
+	}
+	if normalizedTraceExporter(cfg.Observability.Traces.Exporter) == "otlp" &&
+		strings.TrimSpace(cfg.Observability.Traces.Endpoint) == "" {
+		problems = append(problems, "observability.traces.endpoint is required when traces exporter is otlp")
+	}
+	if cfg.Observability.Traces.SampleRatio < 0 || cfg.Observability.Traces.SampleRatio > 1 {
+		problems = append(problems, "observability.traces.sample_ratio must be between 0 and 1")
+	}
+	if cfg.Observability.Traces.BatchTimeout <= 0 {
+		problems = append(problems, "observability.traces.batch_timeout must be positive")
+	}
+	if cfg.Observability.Traces.ExportTimeout <= 0 {
+		problems = append(problems, "observability.traces.export_timeout must be positive")
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func normalizedTraceExporter(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (cfg Config) Redacted() map[string]any {

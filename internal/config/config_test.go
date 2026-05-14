@@ -72,6 +72,12 @@ viewer:
 observability:
   logs:
     level: debug
+  traces:
+    exporter: otlp
+    endpoint: http://otel-collector:4318/v1/traces
+    sample_ratio: 0.25
+    batch_timeout: 3s
+    export_timeout: 2s
 `))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -90,6 +96,21 @@ observability:
 	}
 	if cfg.Observability.Logs.Level != "debug" {
 		t.Fatalf("log level = %q", cfg.Observability.Logs.Level)
+	}
+	if cfg.Observability.Traces.Exporter != "otlp" {
+		t.Fatalf("trace exporter = %q", cfg.Observability.Traces.Exporter)
+	}
+	if cfg.Observability.Traces.Endpoint != "http://otel-collector:4318/v1/traces" {
+		t.Fatalf("trace endpoint = %q", cfg.Observability.Traces.Endpoint)
+	}
+	if cfg.Observability.Traces.SampleRatio != 0.25 {
+		t.Fatalf("trace sample ratio = %f", cfg.Observability.Traces.SampleRatio)
+	}
+	if cfg.Observability.Traces.BatchTimeout != 3*time.Second {
+		t.Fatalf("trace batch timeout = %s", cfg.Observability.Traces.BatchTimeout)
+	}
+	if cfg.Observability.Traces.ExportTimeout != 2*time.Second {
+		t.Fatalf("trace export timeout = %s", cfg.Observability.Traces.ExportTimeout)
 	}
 }
 
@@ -141,6 +162,16 @@ func TestLoadRejectsInvalidConfig(t *testing.T) {
 			name: "bad log exporter",
 			body: validConfigYAML + "\nobservability:\n  logs:\n    exporter: otlp\n",
 			want: "logs.exporter",
+		},
+		{
+			name: "otlp traces without endpoint",
+			body: validConfigYAML + "\nobservability:\n  traces:\n    exporter: otlp\n",
+			want: "traces.endpoint",
+		},
+		{
+			name: "bad trace sample ratio",
+			body: validConfigYAML + "\nobservability:\n  traces:\n    exporter: none\n    sample_ratio: 1.1\n",
+			want: "traces.sample_ratio",
 		},
 	}
 	for _, tt := range tests {

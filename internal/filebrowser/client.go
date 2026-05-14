@@ -11,7 +11,14 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+var defaultTransport = http.DefaultTransport
 
 type Client struct {
 	httpClient *http.Client
@@ -30,6 +37,36 @@ func NewClient(timeout time.Duration) *Client {
 	return &Client{
 		httpClient: &http.Client{Timeout: timeout},
 	}
+}
+
+func NewObservedClient(timeout time.Duration, provider trace.TracerProvider) *Client {
+	if provider == nil {
+		return NewClient(timeout)
+	}
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: timeout,
+			Transport: otelhttp.NewTransport(
+				cloneTransport(defaultTransport),
+				otelhttp.WithTracerProvider(provider),
+				otelhttp.WithMeterProvider(noop.NewMeterProvider()),
+				otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
+					propagation.TraceContext{},
+					propagation.Baggage{},
+				)),
+				otelhttp.WithSpanNameFormatter(func(_ string, _ *http.Request) string {
+					return "filebrowser.http.login"
+				}),
+			),
+		},
+	}
+}
+
+func cloneTransport(rt http.RoundTripper) http.RoundTripper {
+	if transport, ok := rt.(*http.Transport); ok {
+		return transport.Clone()
+	}
+	return rt
 }
 
 func (c *Client) Login(ctx context.Context, viewerURL string, username string, password string) (string, error) {

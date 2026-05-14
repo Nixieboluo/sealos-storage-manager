@@ -224,6 +224,11 @@ const (
 	logLevelError
 )
 
+type traceSink interface {
+	Start(ctx context.Context, name string, attrs []slog.Attr) (context.Context, func(error))
+	Shutdown(ctx context.Context) error
+}
+
 type logSink interface {
 	Enabled(level logLevel) bool
 	Log(level logLevel, msg string, fields ...any)
@@ -232,10 +237,12 @@ type logSink interface {
 type Recorder struct {
 	logger  *Logger
 	metrics *Metrics
+	traces  traceSink
 }
 
 type options struct {
 	metrics MetricSources
+	traces  traceSink
 }
 
 type Option func(*options)
@@ -246,8 +253,14 @@ func WithMetrics(metrics MetricSources) Option {
 	}
 }
 
+func WithTraceSink(traces traceSink) Option {
+	return func(opts *options) {
+		opts.traces = traces
+	}
+}
+
 func New(
-	_ context.Context,
+	ctx context.Context,
 	cfg config.ObservabilityConfig,
 	out io.Writer,
 	opts ...Option,
@@ -260,9 +273,17 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	traces := options.traces
+	if traces == nil {
+		traces, err = newTraceSink(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &Recorder{
 		logger:  logger,
 		metrics: newMetrics(options.metrics),
+		traces:  traces,
 	}, nil
 }
 
@@ -274,8 +295,11 @@ func MustNew(cfg config.ObservabilityConfig, out io.Writer) *Recorder {
 	return recorder
 }
 
-func (r *Recorder) Shutdown(context.Context) error {
-	return nil
+func (r *Recorder) Shutdown(ctx context.Context) error {
+	if r == nil || r.traces == nil {
+		return nil
+	}
+	return r.traces.Shutdown(ctx)
 }
 
 func (r *Recorder) Logger() *Logger {
@@ -286,9 +310,14 @@ func (r *Recorder) Logger() *Logger {
 func (r *Recorder) TraceOperation(ctx context.Context, name string, attrs ...slog.Attr) (context.Context, func(error)) {
 	start := time.Now()
 	fields := append([]slog.Attr{slog.String("operation", name)}, attrs...)
+	finishTrace := func(error) {}
+	if r.traces != nil {
+		ctx, finishTrace = r.traces.Start(ctx, name, attrs)
+	}
 	r.Logger().LogAttrs(ctx, slog.LevelDebug, "operation.start", fields...)
 	return ctx, func(err error) {
 		duration := time.Since(start)
+		finishTrace(err)
 		result := "success"
 		if err != nil {
 			result = "error"

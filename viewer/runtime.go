@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +16,10 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/session"
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -29,8 +34,9 @@ var _ = cron.NewJob("viewer-cleanup", cron.JobConfig{
 })
 
 type Runtime struct {
-	Handler *Handler
-	cleanup *session.CleanupService
+	Handler  *Handler
+	cleanup  *session.CleanupService
+	recorder *observability.Recorder
 }
 
 func NewRuntime(configPath string) (*Runtime, error) {
@@ -46,6 +52,13 @@ func (r *Runtime) Cleanup(ctx context.Context) error {
 		return nil
 	}
 	return r.cleanup.RunOnce(ctx)
+}
+
+func (r *Runtime) Shutdown(ctx context.Context) error {
+	if r == nil || r.recorder == nil {
+		return nil
+	}
+	return r.recorder.Shutdown(ctx)
 }
 
 func runtimeHandler() *Handler {
@@ -72,14 +85,6 @@ func runtimeHandler() *Handler {
 }
 
 func newRuntimeFromConfig(cfg config.Config) (*Runtime, error) {
-	restConfig, err := managementRESTConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("building management kubernetes client: %w", err)
-	}
 	recorder, err := observability.New(
 		context.Background(),
 		cfg.Observability,
@@ -89,13 +94,25 @@ func newRuntimeFromConfig(cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configuring observability: %w", err)
 	}
+	restConfig, err := managementRESTConfig(cfg)
+	if err != nil {
+		_ = recorder.Shutdown(context.Background())
+		return nil, err
+	}
+	wrapKubernetesTransport(restConfig, recorder.OTelTracerProvider())
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		_ = recorder.Shutdown(context.Background())
+		return nil, fmt.Errorf("building management kubernetes client: %w", err)
+	}
+	tracerProvider := recorder.OTelTracerProvider()
 	store := state.New(cfg.Cache)
 	kubeClient := kube.WithObservability(kube.New(clientset), recorder)
 	pods := session.NewPodService(cfg, store, kubeClient, recorder)
 	auth := session.NewAuthService(
 		cfg,
 		store,
-		filebrowser.NewClient(cfg.Viewer.FileBrowser.LoginTimeout),
+		filebrowser.NewObservedClient(cfg.Viewer.FileBrowser.LoginTimeout, tracerProvider),
 		recorder,
 	)
 	viewers := session.NewViewerService(cfg, store, kubeClient, pods, auth, recorder)
@@ -109,9 +126,30 @@ func newRuntimeFromConfig(cfg config.Config) (*Runtime, error) {
 		nil,
 	)
 	return &Runtime{
-		Handler: handler,
-		cleanup: cleanup,
+		Handler:  handler,
+		cleanup:  cleanup,
+		recorder: recorder,
 	}, nil
+}
+
+func wrapKubernetesTransport(restConfig *rest.Config, provider trace.TracerProvider) {
+	if restConfig == nil || provider == nil {
+		return
+	}
+	restConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return otelhttp.NewTransport(
+			rt,
+			otelhttp.WithTracerProvider(provider),
+			otelhttp.WithMeterProvider(noop.NewMeterProvider()),
+			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
+				propagation.TraceContext{},
+				propagation.Baggage{},
+			)),
+			otelhttp.WithSpanNameFormatter(func(_ string, req *http.Request) string {
+				return "kubernetes.http." + req.Method
+			}),
+		)
+	})
 }
 
 func managementRESTConfig(cfg config.Config) (*rest.Config, error) {

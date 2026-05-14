@@ -75,8 +75,12 @@ Application metrics use `encore.dev/metrics` counters. In self-hosted images,
 Encore exports them according to `infra-config.json`, for example through the
 Prometheus `remote_write_url` environment reference. Operation logs use
 `encore.dev/rlog`; Encore attaches those logs to its built-in distributed traces
-when `log_config` is set to `trace` in the infra config. The application YAML
-only selects the log exporter and level:
+when `log_config` is set to `trace` in the infra config.
+
+External distributed tracing is optional and limited to traces. It reuses the
+existing operation instrumentation and wraps File Browser and Kubernetes HTTP
+clients with OpenTelemetry propagation. Keep it disabled for fully local
+offline development, or enable the OTLP HTTP exporter in `viewer.yaml`:
 
 ```yaml
 observability:
@@ -84,6 +88,12 @@ observability:
   logs:
     exporter: encore
     level: info
+  traces:
+    exporter: otlp
+    endpoint: http://otel-collector:4318/v1/traces
+    sample_ratio: 1
+    batch_timeout: 5s
+    export_timeout: 5s
 ```
 
 ## Encore MCP
