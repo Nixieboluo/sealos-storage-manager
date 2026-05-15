@@ -55,6 +55,67 @@ describe('fileBrowserClient', () => {
 		})
 	})
 
+	it('encodes simple upload file paths by segment', async () => {
+		const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+		const client = new FileBrowserClient({
+			baseUrl: 'https://viewer.example.test',
+			token: 'token',
+			fetcher,
+		})
+		const file = new File(['small'], '% done.txt')
+
+		await client.uploadFile('/a folder/中文', file, {
+			overwrite: true,
+			thresholdBytes: 32 * 1024 * 1024,
+		})
+
+		expect(fetcher).toHaveBeenCalledWith(
+			'https://viewer.example.test/api/resources/a%20folder/%E4%B8%AD%E6%96%87/%25%20done.txt?override=true',
+			expect.objectContaining({ method: 'POST', body: file }),
+		)
+	})
+
+	it('builds browser-owned download URLs with query auth', () => {
+		const client = new FileBrowserClient({
+			baseUrl: 'https://viewer.example.test/',
+			token: 'token with spaces',
+			fetcher: vi.fn(),
+		})
+
+		const url = new URL(client.downloadUrl('/a folder/test.txt'))
+
+		expect(url.pathname).toBe('/api/raw/a%20folder/test.txt')
+		expect(url.searchParams.get('auth')).toBe('token with spaces')
+		expect(url.searchParams.get('inline')).toBeNull()
+	})
+
+	it('encodes source path segments and double-encodes destinations for File Browser move actions', async () => {
+		const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+		const client = new FileBrowserClient({
+			baseUrl: 'https://viewer.example.test',
+			token: 'token',
+			fetcher,
+		})
+
+		await client.move(
+			'/a folder/中文/% done/test',
+			'/.storage-manager-trash/objects/id-% done',
+			true,
+		)
+
+		const [url, init] = fetcher.mock.calls[0]!
+		expect(init).toEqual(expect.objectContaining({ method: 'PATCH' }))
+		expect(url).toContain('/api/resources/a%20folder/%E4%B8%AD%E6%96%87/%25%20done/test?')
+		expect(url).toContain('destination=%2F.storage-manager-trash%2Fobjects%2Fid-%2525%2520done')
+
+		const parsed = new URL(url)
+		expect(parsed.searchParams.get('action')).toBe('rename')
+		expect(parsed.searchParams.get('destination')).toBe('/.storage-manager-trash/objects/id-%25%20done')
+		expect(decodeURIComponent(parsed.searchParams.get('destination') ?? '')).toBe('/.storage-manager-trash/objects/id-% done')
+		expect(parsed.searchParams.get('override')).toBe('true')
+		expect(parsed.searchParams.get('rename')).toBe('false')
+	})
+
 	it('normalizes conflict errors from File Browser responses', async () => {
 		const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
 			message: 'already exists',

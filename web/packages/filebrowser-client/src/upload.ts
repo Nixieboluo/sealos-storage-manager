@@ -1,7 +1,7 @@
 import * as tus from 'tus-js-client'
 
 import { FileBrowserError } from './errors'
-import { normalizePath } from './path'
+import { encodePath } from './path'
 
 export const defaultTusThresholdBytes = 32 * 1024 * 1024
 export const defaultTusChunkBytes = 8 * 1024 * 1024
@@ -9,6 +9,7 @@ export const defaultTusChunkBytes = 8 * 1024 * 1024
 export interface UploadProgress {
 	readonly bytesUploaded: number
 	readonly bytesTotal: number
+	readonly chunkSize?: number
 }
 
 export interface UploadOptions {
@@ -22,6 +23,7 @@ export interface UploadOptions {
 
 export interface TusUploadOptions extends UploadOptions {
 	readonly endpoint: string
+	readonly fetcher?: typeof fetch
 	readonly token: string
 	readonly file: Blob
 	readonly path: string
@@ -45,11 +47,46 @@ export function retryDelays(retryCount = 5): number[] {
 }
 
 export function uploadTus(options: TusUploadOptions): Promise<void> {
-	const uploadPath = normalizePath(options.path)
-	const endpoint = `${options.endpoint.replace(/\/$/, '')}/api/tus${uploadPath}?override=${options.overwrite === true}`
+	const uploadPath = encodePath(options.path)
+	const uploadUrl = `${options.endpoint.replace(/\/$/, '')}/api/tus${uploadPath}?override=${options.overwrite === true}`
+	const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis)
 	return new Promise((resolve, reject) => {
+		let settled = false
+		const rejectOnce = (error: Error) => {
+			if (settled) {
+				return
+			}
+			settled = true
+			reject(error)
+		}
+		const resolveOnce = () => {
+			if (settled) {
+				return
+			}
+			settled = true
+			resolve()
+		}
+
+		const createUpload = async () => {
+			const response = await fetcher(uploadUrl, {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${options.token}`,
+					'X-Auth': options.token,
+				},
+				signal: options.signal,
+			})
+			if (response.status !== 201) {
+				throw new FileBrowserError({
+					status: response.status,
+					code: response.status === 409 ? 'FILE_CONFLICT' : 'TUS_UPLOAD_FAILED',
+					message: await response.text().catch(() => response.statusText) || response.statusText || 'Failed to create TUS upload',
+				})
+			}
+		}
+
 		const upload = new tus.Upload(options.file, {
-			endpoint,
+			uploadUrl,
 			chunkSize: options.chunkSizeBytes ?? defaultTusChunkBytes,
 			retryDelays: retryDelays(options.retryCount ?? 5),
 			parallelUploads: 1,
@@ -66,30 +103,44 @@ export function uploadTus(options: TusUploadOptions): Promise<void> {
 				const status = error instanceof tus.DetailedError
 					? error.originalResponse?.getStatus() ?? 0
 					: 0
-				reject(new FileBrowserError({
+				rejectOnce(new FileBrowserError({
 					status,
 					code: status === 409 ? 'FILE_CONFLICT' : 'TUS_UPLOAD_FAILED',
 					message: error.message,
 				}))
 			},
-			onProgress(bytesUploaded, bytesTotal) {
-				options.onProgress?.({ bytesUploaded, bytesTotal })
+			onChunkComplete(chunkSize, bytesUploaded, bytesTotal) {
+				options.onProgress?.({ bytesUploaded, bytesTotal, chunkSize })
 			},
 			onSuccess() {
-				resolve()
+				resolveOnce()
 			},
 		})
 		if (options.signal) {
 			if (options.signal.aborted) {
 				upload.abort(true)
-				reject(new DOMException('Upload aborted', 'AbortError'))
+				rejectOnce(new DOMException('Upload aborted', 'AbortError'))
 				return
 			}
 			options.signal.addEventListener('abort', () => {
 				upload.abort(true)
-				reject(new DOMException('Upload aborted', 'AbortError'))
+				rejectOnce(new DOMException('Upload aborted', 'AbortError'))
 			}, { once: true })
 		}
-		upload.start()
+		void createUpload()
+			.then(() => {
+				if (!settled) {
+					upload.start()
+				}
+			})
+			.catch((error: unknown) => {
+				rejectOnce(error instanceof Error
+					? error
+					: new FileBrowserError({
+							status: 0,
+							code: 'TUS_UPLOAD_FAILED',
+							message: 'Failed to create TUS upload',
+						}))
+			})
 	})
 }

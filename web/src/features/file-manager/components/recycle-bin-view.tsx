@@ -24,9 +24,11 @@ import {
 	TableHeader,
 	TableRow,
 } from '@/components/ui/table'
-import { fileManagerKeys } from '@/features/file-manager/api/file-manager-query-keys'
+import {
+	clearRecycleBinMutationOptions,
+	restoreRecycleEntryMutationOptions,
+} from '@/features/file-manager/api/file-manager-mutations'
 import { recycleBinQueryOptions } from '@/features/file-manager/api/file-manager-query-options'
-import { clearRecycleBin, restoreRecycleEntry } from '@/features/file-manager/api/recycle-bin-api'
 import { remainingTrashDays } from '@/features/file-manager/utils/file-tree'
 import { formatBytes } from '@/features/viewer/utils/format-capacity'
 
@@ -42,47 +44,28 @@ export function RecycleBinView({ session }: RecycleBinViewProps) {
 	const [restoring, setRestoring] = useState<RecycleEntry | null>(null)
 	const [clearing, setClearing] = useState(false)
 
-	function invalidate() {
-		if (!session) {
-			return
-		}
-		void queryClient.invalidateQueries({
-			queryKey: fileManagerKeys.recycleBin(session.pvcKey),
-		})
-		void queryClient.invalidateQueries({
-			queryKey: fileManagerKeys.all,
+	const restoreMutation = useMutation(restoreRecycleEntryMutationOptions(queryClient, session))
+	const clearMutation = useMutation(clearRecycleBinMutationOptions(queryClient, session))
+
+	const restoreEntry = (entry: RecycleEntry) => {
+		restoreMutation.mutate(entry, {
+			onSuccess: () => {
+				toast.success(t('trash.restored'))
+				setRestoring(null)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
 		})
 	}
 
-	const restoreMutation = useMutation({
-		mutationFn: async (entry: RecycleEntry) => {
-			if (!session) {
-				throw new Error('File Browser session is not ready')
-			}
-			await restoreRecycleEntry(session.client, entry)
-		},
-		onSuccess: () => {
-			toast.success(t('trash.restored'))
-			setRestoring(null)
-			invalidate()
-		},
-		onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-	})
-
-	const clearMutation = useMutation({
-		mutationFn: async () => {
-			if (!session) {
-				throw new Error('File Browser session is not ready')
-			}
-			await clearRecycleBin(session.client)
-		},
-		onSuccess: () => {
-			toast.success(t('trash.cleared'))
-			setClearing(false)
-			invalidate()
-		},
-		onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-	})
+	const clearRecycleBinEntries = () => {
+		clearMutation.mutate(undefined, {
+			onSuccess: () => {
+				toast.success(t('trash.cleared'))
+				setClearing(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}
 
 	return (
 		<section className="flex min-h-0 flex-1 flex-col gap-4">
@@ -180,7 +163,7 @@ export function RecycleBinView({ session }: RecycleBinViewProps) {
 						</Button>
 						<Button
 							disabled={restoreMutation.isPending || !restoring}
-							onClick={() => restoring && restoreMutation.mutate(restoring)}
+							onClick={() => restoring && restoreEntry(restoring)}
 						>
 							{t('trash.restore')}
 						</Button>
@@ -200,7 +183,7 @@ export function RecycleBinView({ session }: RecycleBinViewProps) {
 						</Button>
 						<Button
 							disabled={clearMutation.isPending}
-							onClick={() => clearMutation.mutate()}
+							onClick={clearRecycleBinEntries}
 							variant="destructive"
 						>
 							{t('trash.clear')}

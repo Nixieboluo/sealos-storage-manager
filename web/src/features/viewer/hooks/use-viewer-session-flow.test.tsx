@@ -1,9 +1,10 @@
-import { act, renderHook } from '@testing-library/react'
+import { act } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ViewerApiError } from '@/features/viewer/api/viewer-error'
 import { useViewerSessionFlow } from '@/features/viewer/hooks/use-viewer-session-flow'
 import { createFakeViewerAPI, viewerSessionFixture, viewerTokenFixture } from '@/features/viewer/test/fakes'
+import { renderHookWithProviders } from '@/test/render'
 
 describe('useViewerSessionFlow', () => {
 	afterEach(() => {
@@ -22,7 +23,7 @@ describe('useViewerSessionFlow', () => {
 			issueViewerToken,
 		})
 
-		const { result } = renderHook(() =>
+		const { result } = renderHookWithProviders(() =>
 			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
 		)
 
@@ -61,7 +62,7 @@ describe('useViewerSessionFlow', () => {
 			getViewerSession,
 		})
 
-		const { result } = renderHook(() =>
+		const { result } = renderHookWithProviders(() =>
 			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
 		)
 
@@ -85,7 +86,7 @@ describe('useViewerSessionFlow', () => {
 		const createViewerSession = vi.fn().mockResolvedValue(viewerSessionFixture({ id: 'vs_1', status: 'creating' }))
 		const api = createFakeViewerAPI({ createViewerSession })
 
-		const { result } = renderHook(() =>
+		const { result } = renderHookWithProviders(() =>
 			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
 		)
 
@@ -105,5 +106,41 @@ describe('useViewerSessionFlow', () => {
 		expect(result.current.manualCloseKind).toBe('viewer')
 		expect(result.current.token).toBeNull()
 		expect(createViewerSession).toHaveBeenCalledTimes(1)
+	})
+
+	it('does not issue duplicate tokens when session polling causes rerenders', async () => {
+		vi.useFakeTimers()
+		const getViewerSession = vi
+			.fn()
+			.mockResolvedValue(viewerSessionFixture({ id: 'vs_1', status: 'ready', token_ready: true }))
+		const issueViewerToken = vi.fn().mockResolvedValue(viewerTokenFixture({ viewer_session_id: 'vs_1' }))
+		const api = createFakeViewerAPI({
+			createViewerSession: async () => viewerSessionFixture({ id: 'vs_1', status: 'creating' }),
+			getViewerSession,
+			issueViewerToken,
+		})
+
+		const { result, rerender } = renderHookWithProviders(() =>
+			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
+		)
+
+		await act(async () => {
+			await result.current.start({
+				namespace: 'default',
+				pvcName: 'data',
+				uid: 'uid',
+			})
+		})
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1000)
+		})
+		await vi.waitFor(() => expect(result.current.status).toBe('ready'))
+
+		rerender()
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(0)
+		})
+
+		expect(issueViewerToken).toHaveBeenCalledTimes(1)
 	})
 })

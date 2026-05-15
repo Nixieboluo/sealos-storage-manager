@@ -1,10 +1,12 @@
+import type { FileBrowserResource } from '@sealos-storage-manager/filebrowser-client'
+import type { UseQueryResult } from '@tanstack/react-query'
 import type { ColumnDef, SortingState } from '@tanstack/react-table'
-import type { FileBrowserSession, FileEntry, FileTableRow } from '@/features/file-manager/types/file-manager'
+import type { FileBrowserSession, FileEntry, FileListResult, FileTableRow } from '@/features/file-manager/types/file-manager'
 import type { FileSortState } from '@/features/file-manager/utils/file-tree'
 import type { SessionCapability } from '@/features/viewer/utils/session-capability'
 
-import { joinPath, parentPath } from '@sealos-storage-manager/filebrowser-client'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { parentPath } from '@sealos-storage-manager/filebrowser-client'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 import {
 	ArrowLeft,
@@ -19,7 +21,7 @@ import {
 	Trash2,
 	Upload,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -44,12 +46,16 @@ import {
 	TableHeader,
 	TableRow,
 } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
-import { env } from '@/config/env'
-import { fileManagerKeys } from '@/features/file-manager/api/file-manager-query-keys'
+import { invalidateFileTreeQueries } from '@/features/file-manager/api/file-manager-cache'
+import {
+	createFolderMutationOptions,
+	createUploadTaskID,
+	moveToRecycleBinMutationOptions,
+	saveFileTextMutationOptions,
+	uploadFileMutationOptions,
+} from '@/features/file-manager/api/file-manager-mutations'
 import { fileListQueryOptions, fileTextQueryOptions } from '@/features/file-manager/api/file-manager-query-options'
-import { moveToRecycleBin } from '@/features/file-manager/api/recycle-bin-api'
-import { uploadActions, useUploadTasks } from '@/features/file-manager/stores/upload-store'
+import { uploadActions, useUploadTask, useUploadTasks } from '@/features/file-manager/stores/upload-store'
 import {
 	buildFileTableRows,
 	flattenResources,
@@ -58,6 +64,7 @@ import {
 	sortEntries,
 } from '@/features/file-manager/utils/file-tree'
 import { formatBytes } from '@/features/viewer/utils/format-capacity'
+import { cn } from '@/utils/cn'
 
 interface FileManagerViewProps {
 	currentPath: string
@@ -65,11 +72,13 @@ interface FileManagerViewProps {
 	onPathChange: (path: string) => void
 	onReconnect: (error?: unknown) => void
 	onRefreshSession: () => void
+	podSessionID?: string | null
 	pvcName?: string
 	session: FileBrowserSession | null
 	sessionCapability: SessionCapability
 	sort: FileSortState
 	setSort: (sort: FileSortState) => void
+	viewerSessionID?: string | null
 }
 
 interface BranchState {
@@ -79,19 +88,26 @@ interface BranchState {
 }
 
 interface BranchTreeState {
-	branches: Record<string, BranchState | undefined>
-	expandedPaths: Set<string>
+	expandedDepths: Record<string, number | undefined>
 	scope: string
+}
+
+interface BranchQuerySnapshot {
+	data?: FileBrowserResource
+	error: Error | null
+	isFetching: boolean
+	isLoading: boolean
 }
 
 const emptyEntries: FileEntry[] = []
 const emptyBranches: Record<string, BranchState | undefined> = {}
-const emptyExpandedPaths = new Set<string>()
+const emptyExpandedDepths: Record<string, number | undefined> = {}
+const maxEditableFileBytes = 32 * 1024 * 1024
+const MonacoEditor = lazy(() => import('@monaco-editor/react'))
 
 function createBranchTreeState(scope: string): BranchTreeState {
 	return {
-		branches: {},
-		expandedPaths: new Set(),
+		expandedDepths: {},
 		scope,
 	}
 }
@@ -102,11 +118,13 @@ export function FileManagerView({
 	onPathChange,
 	onReconnect,
 	onRefreshSession,
+	podSessionID,
 	pvcName,
 	session,
 	sessionCapability,
 	sort,
 	setSort,
+	viewerSessionID,
 }: FileManagerViewProps) {
 	const { t } = useTranslation()
 	const queryClient = useQueryClient()
@@ -114,11 +132,49 @@ export function FileManagerView({
 	const canUseFiles = sessionCapability.canUseFiles && session !== null
 	const fileQuery = useQuery(fileListQueryOptions(session, currentPath, sort, canUseFiles))
 	const entries = fileQuery.data?.entries ?? emptyEntries
-	const tasks = useUploadTasks()
 	const treeScope = `${session?.pvcKey ?? 'inactive'}:${currentPath}`
 	const [treeState, setTreeState] = useState<BranchTreeState>(() => createBranchTreeState(treeScope))
-	const expandedPaths = treeState.scope === treeScope ? treeState.expandedPaths : emptyExpandedPaths
-	const branches = treeState.scope === treeScope ? treeState.branches : emptyBranches
+	const expandedDepths = treeState.scope === treeScope ? treeState.expandedDepths : emptyExpandedDepths
+	const expandedPathList = useMemo(() => Object.keys(expandedDepths), [expandedDepths])
+	const expandedPaths = useMemo(() => new Set(expandedPathList), [expandedPathList])
+	const branchQueryOptions = useMemo(
+		() => expandedPathList.map(path => fileListQueryOptions(session, path, sort, canUseFiles)),
+		[canUseFiles, expandedPathList, session, sort],
+	)
+	const branchQueries = useQueries({
+		queries: branchQueryOptions,
+		combine: useCallback((results: UseQueryResult<FileListResult, Error>[]) =>
+			results.map((result): BranchQuerySnapshot => ({
+				data: result.data?.current,
+				error: result.error instanceof Error ? result.error : null,
+				isFetching: result.isFetching,
+				isLoading: result.isLoading,
+			})), []),
+	})
+	const branches = useMemo(() => {
+		if (expandedPathList.length === 0) {
+			return emptyBranches
+		}
+		const nextBranches: Record<string, BranchState | undefined> = {}
+		expandedPathList.forEach((path, index) => {
+			const query = branchQueries[index]
+			const depth = expandedDepths[path] ?? 0
+			if (!query || query.isLoading || query.isFetching) {
+				nextBranches[path] = { isLoading: true }
+				return
+			}
+			if (query.error) {
+				nextBranches[path] = { error: query.error }
+				return
+			}
+			nextBranches[path] = {
+				entries: query.data
+					? sortEntries(flattenResources(query.data, depth + 1), sort)
+					: [],
+			}
+		})
+		return nextBranches
+	}, [branchQueries, expandedDepths, expandedPathList, sort])
 
 	const operationsDisabled = !canUseFiles || fileQuery.isFetching || hasPendingBranches(branches)
 	const showOverlay = canShowFileList && (fileQuery.isFetching || sessionCapability.kind === 'viewer-reconnecting')
@@ -130,94 +186,26 @@ export function FileManagerView({
 		}
 	}, [fileQuery.error, onReconnect])
 
-	const invalidateFiles = useCallback(() => {
-		if (!session || !canUseFiles) {
-			return
-		}
-		void queryClient.invalidateQueries({
-			queryKey: fileManagerKeys.files(session.pvcKey, currentPath),
-		})
-		void queryClient.invalidateQueries({
-			queryKey: fileManagerKeys.recycleBin(session.pvcKey),
-		})
-	}, [canUseFiles, currentPath, queryClient, session])
-
-	const loadBranch = useCallback(async (entry: FileEntry) => {
-		if (!session || !canUseFiles) {
-			return
-		}
-		setTreeState((current) => {
-			const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
-			return {
-				...scoped,
-				branches: {
-					...scoped.branches,
-					[entry.path]: { isLoading: true },
-				},
-			}
-		})
-		try {
-			const resource = await queryClient.fetchQuery(fileListQueryOptions(session, entry.path, sort, canUseFiles))
-			setTreeState((current) => {
-				const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
-				return {
-					...scoped,
-					branches: {
-						...scoped.branches,
-						[entry.path]: {
-							entries: sortEntries(
-								flattenResources(resource.current, entry.depth + 1),
-								sort,
-							),
-						},
-					},
-				}
-			})
-		}
-		catch (caught) {
-			const error = caught instanceof Error ? caught : new Error(t('errors.generic'))
-			setTreeState((current) => {
-				const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
-				return {
-					...scoped,
-					branches: {
-						...scoped.branches,
-						[entry.path]: { error },
-					},
-				}
-			})
-			onReconnect(caught)
-		}
-	}, [canUseFiles, onReconnect, queryClient, session, sort, t, treeScope])
-
-	const toggleFolder = useCallback(async (entry: FileEntry) => {
+	const toggleFolder = useCallback((entry: FileEntry) => {
 		if (!session || operationsDisabled) {
 			return
 		}
 
-		const hasEntries = Boolean(branches[entry.path]?.entries)
-		const shouldLoad = !expandedPaths.has(entry.path) && !hasEntries
 		setTreeState((current) => {
 			const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
-			const next = new Set(scoped.expandedPaths)
-			if (next.has(entry.path)) {
-				next.delete(entry.path)
+			const next = { ...scoped.expandedDepths }
+			if (next[entry.path] !== undefined) {
+				delete next[entry.path]
 			}
 			else {
-				next.add(entry.path)
+				next[entry.path] = entry.depth
 			}
 			return {
 				...scoped,
-				expandedPaths: next,
+				expandedDepths: next,
 			}
 		})
-
-		if (!shouldLoad) {
-			return
-		}
-
-		await loadBranch(entry)
-	}, [branches, expandedPaths, loadBranch, operationsDisabled, session, treeScope])
+	}, [operationsDisabled, session, treeScope])
 
 	const rows = useMemo(
 		() => buildFileTableRows(entries, expandedPaths, branches),
@@ -232,9 +220,8 @@ export function FileManagerView({
 					disabled={operationsDisabled}
 					isExpanded={info.row.original.kind === 'resource' && expandedPaths.has(info.row.original.entry.path)}
 					onRetryBranch={(path) => {
-						const entry = rows.find(row => row.kind === 'resource' && row.entry.path === path)
-						if (entry?.kind === 'resource') {
-							void loadBranch(entry.entry)
+						if (session) {
+							invalidateFileTreeQueries(queryClient, session, [path])
 						}
 					}}
 					onToggleFolder={entry => void toggleFolder(entry)}
@@ -288,7 +275,6 @@ export function FileManagerView({
 						<FileActions
 							disabled={operationsDisabled}
 							entry={info.row.original.entry}
-							onDeleted={invalidateFiles}
 							onOpenFolder={onPathChange}
 							session={session}
 						/>
@@ -297,7 +283,7 @@ export function FileManagerView({
 			header: () => <span>{t('files.columns.actions')}</span>,
 			id: 'actions',
 		},
-	], [expandedPaths, invalidateFiles, loadBranch, operationsDisabled, onPathChange, rows, session, setSort, sort, t, toggleFolder])
+	], [expandedPaths, operationsDisabled, onPathChange, queryClient, session, setSort, sort, t, toggleFolder])
 
 	const table = useReactTable({
 		columns,
@@ -331,14 +317,14 @@ export function FileManagerView({
 									<CreateFolderDialog
 										currentPath={currentPath}
 										disabled={operationsDisabled}
-										onCreated={invalidateFiles}
 										session={session}
 									/>
 									<UploadDialog
 										currentPath={currentPath}
 										disabled={operationsDisabled}
-										onUploaded={invalidateFiles}
+										podSessionID={podSessionID}
 										session={session}
+										viewerSessionID={viewerSessionID}
 									/>
 									<Button
 										aria-label={t('actions.refresh')}
@@ -464,33 +450,58 @@ export function FileManagerView({
 						</>
 					)}
 
-			{tasks.length > 0
-				? (
-						<div className="grid gap-2 rounded-lg border bg-card p-3">
-							<div className="flex items-center justify-between gap-3">
-								<div className="text-sm font-medium">{t('files.uploadTasks')}</div>
-								<Button onClick={() => uploadActions.clearCompleted()} size="sm" variant="ghost">
-									{t('files.clearCompleted')}
-								</Button>
-							</div>
-							{tasks.map((task) => {
-								const value = task.bytesTotal > 0
-									? Math.round((task.bytesUploaded / task.bytesTotal) * 100)
-									: 0
-								return (
-									<div className="grid gap-1" key={task.id}>
-										<div className="flex items-center justify-between gap-3 text-xs">
-											<span className="truncate">{task.fileName}</span>
-											<span className="text-muted-foreground">{task.status}</span>
-										</div>
-										<Progress value={value} />
-									</div>
-								)
-							})}
-						</div>
-					)
-				: null}
+			<UploadTaskList />
 		</section>
+	)
+}
+
+function UploadTaskList() {
+	const { t } = useTranslation()
+	const tasks = useUploadTasks()
+
+	if (tasks.length === 0) {
+		return null
+	}
+
+	return (
+		<div className="grid gap-2 rounded-lg border bg-card p-3">
+			<div className="flex items-center justify-between gap-3">
+				<div className="text-sm font-medium">{t('files.uploadTasks')}</div>
+				<Button onClick={() => uploadActions.clearCompleted()} size="sm" variant="ghost">
+					{t('files.clearCompleted')}
+				</Button>
+			</div>
+			{tasks.map(task => (
+				<UploadTaskRow key={task.id} taskID={task.id} />
+			))}
+		</div>
+	)
+}
+
+interface UploadTaskRowProps {
+	taskID: string
+}
+
+function UploadTaskRow({ taskID }: UploadTaskRowProps) {
+	const task = useUploadTask(taskID)
+	if (!task) {
+		return null
+	}
+	const value = task.bytesTotal > 0
+		? Math.round((task.bytesUploaded / task.bytesTotal) * 100)
+		: 0
+
+	return (
+		<div className="grid gap-1">
+			<div className="flex items-center justify-between gap-3 text-xs">
+				<span className="truncate">{task.fileName}</span>
+				<span className="text-muted-foreground">{task.status}</span>
+			</div>
+			<Progress
+				className={cn(task.status === 'failed' && 'bg-destructive/20 [&_[data-slot=progress-indicator]]:bg-destructive')}
+				value={value}
+			/>
+		</div>
 	)
 }
 
@@ -578,58 +589,69 @@ function FileNameCell({
 interface FileActionsProps {
 	disabled: boolean
 	entry: FileEntry
-	onDeleted: () => void
 	onOpenFolder: (path: string) => void
 	session: FileBrowserSession
 }
 
-function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: FileActionsProps) {
+function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProps) {
 	const { t } = useTranslation()
 	const [editing, setEditing] = useState(false)
 	const [deleting, setDeleting] = useState(false)
 	const queryClient = useQueryClient()
 	const textQuery = useQuery(fileTextQueryOptions(session, editing ? entry.path : null))
 	const [editorContent, setEditorContent] = useState('')
+	const [isEditorDirty, setIsEditorDirty] = useState(false)
+	const saveMutation = useMutation(saveFileTextMutationOptions(queryClient, session))
+	const deleteMutation = useMutation(moveToRecycleBinMutationOptions(queryClient, session))
+	const editorValue = isEditorDirty ? editorContent : (textQuery.data ?? editorContent)
 
-	const saveMutation = useMutation({
-		mutationFn: (content: string) => session.client.saveText(entry.path, content),
-		onSuccess: () => {
-			toast.success(t('files.saved'))
-			void queryClient.invalidateQueries({ queryKey: fileManagerKeys.text(session.pvcKey, entry.path) })
-			setEditing(false)
-		},
-		onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-	})
+	const saveFile = useCallback(() => {
+		saveMutation.mutate({
+			content: editorValue,
+			path: entry.path,
+		}, {
+			onSuccess: () => {
+				toast.success(t('files.saved'))
+				setEditing(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}, [editorValue, entry.path, saveMutation, t])
 
-	const deleteMutation = useMutation({
-		mutationFn: () => moveToRecycleBin(session.client, entry.path, entry.isDir, entry.size),
-		onSuccess: () => {
-			toast.success(t('trash.moved'))
-			setDeleting(false)
-			onDeleted()
-		},
-		onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-	})
+	const deleteFile = useCallback(() => {
+		deleteMutation.mutate({
+			isDir: entry.isDir,
+			path: entry.path,
+			size: entry.size,
+		}, {
+			onSuccess: () => {
+				toast.success(t('trash.moved'))
+				setDeleting(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}, [deleteMutation, entry.isDir, entry.path, entry.size, t])
 
-	async function download() {
-		try {
-			const blob = await session.client.downloadBlob(entry.path)
-			const href = URL.createObjectURL(blob)
-			const anchor = document.createElement('a')
-			anchor.href = href
-			anchor.download = entry.name
-			anchor.click()
-			URL.revokeObjectURL(href)
-		}
-		catch (error) {
-			toast.error(error instanceof Error ? error.message : t('errors.generic'))
-		}
+	function download() {
+		const anchor = document.createElement('a')
+		anchor.href = session.client.downloadUrl(entry.path)
+		anchor.download = entry.name
+		anchor.rel = 'noreferrer'
+		anchor.click()
 	}
 
 	function openEditor() {
+		if (entry.size > maxEditableFileBytes) {
+			toast.error(t('files.editorTooLarge', { size: formatBytes(maxEditableFileBytes) }))
+			return
+		}
 		setEditing(true)
 		setEditorContent(textQuery.data ?? '')
+		setIsEditorDirty(false)
 	}
+
+	const isSaving = saveMutation.isPending
+	const canEdit = !entry.isDir && isEditableFile(entry.path)
 
 	return (
 		<>
@@ -647,11 +669,11 @@ function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: File
 							</Button>
 						)
 					: (
-							<Button aria-label={t('files.download')} disabled={disabled} onClick={() => void download()} size="icon" variant="ghost">
+							<Button aria-label={t('files.download')} disabled={disabled} onClick={download} size="icon" variant="ghost">
 								<Download />
 							</Button>
 						)}
-				{!entry.isDir && isEditableFile(entry.path)
+				{canEdit
 					? (
 							<Button aria-label={t('files.edit')} disabled={disabled} onClick={openEditor} size="icon" variant="ghost">
 								<Edit3 />
@@ -663,24 +685,56 @@ function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: File
 				</Button>
 			</div>
 
-			<Dialog onOpenChange={setEditing} open={editing}>
-				<DialogContent className="sm:max-w-3xl">
+			<Dialog onOpenChange={open => !isSaving && setEditing(open)} open={editing}>
+				<DialogContent className="sm:max-w-4xl" showCloseButton={!isSaving}>
 					<DialogHeader>
 						<DialogTitle>{t('files.editorTitle')}</DialogTitle>
 						<DialogDescription>{entry.name}</DialogDescription>
 					</DialogHeader>
-					<Textarea
-						className="min-h-96 font-mono text-sm"
-						onChange={event => setEditorContent(event.target.value)}
-						value={editorContent}
-					/>
+					{isSaving
+						? (
+								<ModalStatus
+									description={t('files.savingDescription')}
+									title={t('files.savingTitle')}
+								/>
+							)
+						: null}
+					<div className="overflow-hidden rounded-md border">
+						{!textQuery.isError
+							? (
+									<Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t('common.loading')}</div>}>
+										<MonacoEditor
+											height="28rem"
+											language={editorLanguage(entry.path)}
+											loading={t('common.loading')}
+											onChange={(value) => {
+												setEditorContent(value ?? '')
+												setIsEditorDirty(true)
+											}}
+											options={{
+												fontSize: 13,
+												minimap: { enabled: false },
+												readOnly: isSaving || textQuery.isLoading,
+												scrollBeyondLastLine: false,
+												wordWrap: 'on',
+											}}
+											value={textQuery.isLoading ? '' : editorValue}
+										/>
+									</Suspense>
+								)
+							: (
+									<div className="p-4 text-sm text-destructive">
+										{textQuery.error instanceof Error ? textQuery.error.message : t('errors.generic')}
+									</div>
+								)}
+					</div>
 					<DialogFooter>
-						<Button onClick={() => setEditing(false)} type="button" variant="outline">
+						<Button disabled={isSaving} onClick={() => setEditing(false)} type="button" variant="outline">
 							{t('actions.cancel')}
 						</Button>
 						<Button
-							disabled={saveMutation.isPending || textQuery.isLoading}
-							onClick={() => saveMutation.mutate(editorContent || textQuery.data || '')}
+							disabled={isSaving || textQuery.isLoading || textQuery.isError}
+							onClick={saveFile}
 							type="button"
 						>
 							{t('actions.save')}
@@ -701,7 +755,7 @@ function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: File
 						</Button>
 						<Button
 							disabled={deleteMutation.isPending}
-							onClick={() => deleteMutation.mutate()}
+							onClick={deleteFile}
 							variant="destructive"
 						>
 							{t('actions.delete')}
@@ -716,30 +770,31 @@ function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: File
 interface DialogWithSessionProps {
 	currentPath: string
 	disabled: boolean
-	onCreated?: () => void
-	onUploaded?: () => void
+	podSessionID?: string | null
 	session: FileBrowserSession | null
+	viewerSessionID?: string | null
 }
 
-function CreateFolderDialog({ currentPath, disabled, onCreated, session }: DialogWithSessionProps) {
+function CreateFolderDialog({ currentPath, disabled, session }: DialogWithSessionProps) {
 	const { t } = useTranslation()
+	const queryClient = useQueryClient()
 	const [open, setOpen] = useState(false)
 	const [name, setName] = useState('')
-	const mutation = useMutation({
-		mutationFn: async () => {
-			if (!session) {
-				throw new Error('File Browser session is not ready')
-			}
-			await session.client.createFolder(joinPath(currentPath, name))
-		},
-		onSuccess: () => {
-			toast.success(t('files.folderCreated'))
-			setName('')
-			setOpen(false)
-			onCreated?.()
-		},
-		onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-	})
+	const mutation = useMutation(createFolderMutationOptions(queryClient, session))
+
+	const createFolder = useCallback(() => {
+		mutation.mutate({
+			currentPath,
+			name,
+		}, {
+			onSuccess: () => {
+				toast.success(t('files.folderCreated'))
+				setName('')
+				setOpen(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}, [currentPath, mutation, name, t])
 
 	return (
 		<>
@@ -767,7 +822,7 @@ function CreateFolderDialog({ currentPath, disabled, onCreated, session }: Dialo
 						</Button>
 						<Button
 							disabled={mutation.isPending || name.trim().length === 0}
-							onClick={() => mutation.mutate()}
+							onClick={createFolder}
 						>
 							{t('actions.create')}
 						</Button>
@@ -778,91 +833,146 @@ function CreateFolderDialog({ currentPath, disabled, onCreated, session }: Dialo
 	)
 }
 
-function UploadDialog({ currentPath, disabled, onUploaded, session }: DialogWithSessionProps) {
+function UploadDialog({
+	currentPath,
+	disabled,
+	podSessionID,
+	session,
+	viewerSessionID,
+}: DialogWithSessionProps) {
 	const { t } = useTranslation()
+	const queryClient = useQueryClient()
 	const [open, setOpen] = useState(false)
 	const [file, setFile] = useState<File | null>(null)
+	const [activeTaskID, setActiveTaskID] = useState<string | null>(null)
 	const inputRef = useRef<HTMLInputElement | null>(null)
-	const uploadTaskIDRef = useRef<string | null>(null)
-	const mutation = useMutation({
-		mutationFn: async () => {
-			if (!session || !file) {
-				throw new Error('File Browser session is not ready')
-			}
-			const id = `${Date.now()}-${file.name}`
-			uploadTaskIDRef.current = id
-			uploadActions.addTask({
-				id,
-				fileName: file.name,
-				targetPath: currentPath,
-				bytesUploaded: 0,
-				bytesTotal: file.size,
-				status: 'uploading',
+	const mutation = useMutation(uploadFileMutationOptions(queryClient, session))
+	const activeTask = useUploadTask(activeTaskID)
+	const isUploading = mutation.isPending
+	const uploadProgress = activeTask && activeTask.bytesTotal > 0
+		? Math.round((activeTask.bytesUploaded / activeTask.bytesTotal) * 100)
+		: 0
+	const chunkLabel = activeTask?.chunkTotal
+		? t('files.uploadChunks', {
+				current: activeTask.chunkIndex ?? 0,
+				total: activeTask.chunkTotal,
 			})
-			await session.client.uploadFile(currentPath, file, {
-				chunkSizeBytes: env.fileUploadTusChunkBytes,
-				retryCount: env.fileUploadTusRetryCount,
-				thresholdBytes: env.fileUploadTusThresholdBytes,
-				onProgress: progress => uploadActions.updateTask(id, {
-					bytesUploaded: progress.bytesUploaded,
-					bytesTotal: progress.bytesTotal,
-				}),
-			})
-			uploadActions.updateTask(id, {
-				bytesUploaded: file.size,
-				status: 'success',
-			})
-		},
-		onSuccess: () => {
-			toast.success(t('files.uploaded'))
-			setFile(null)
-			setOpen(false)
-			onUploaded?.()
-		},
-		onError: (error) => {
-			if (uploadTaskIDRef.current) {
-				uploadActions.updateTask(uploadTaskIDRef.current, { status: 'failed' })
-			}
-			toast.error(error instanceof Error ? error.message : t('errors.generic'))
-		},
-	})
+		: t('files.uploadPreparing')
+
+	const resetDialogState = useCallback(() => {
+		setFile(null)
+		setActiveTaskID(null)
+		if (inputRef.current) {
+			inputRef.current.value = ''
+		}
+	}, [])
+
+	const openUploadDialog = useCallback(() => {
+		resetDialogState()
+		setOpen(true)
+	}, [resetDialogState])
+
+	const uploadFile = useCallback(() => {
+		if (!file) {
+			return
+		}
+		const taskID = createUploadTaskID(file.name)
+		setActiveTaskID(taskID)
+		mutation.mutate({
+			currentPath,
+			file,
+			podSessionID: podSessionID ?? undefined,
+			taskID,
+			viewerSessionID: viewerSessionID ?? undefined,
+		}, {
+			onSuccess: () => {
+				toast.success(t('files.uploaded'))
+				resetDialogState()
+				setOpen(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}, [currentPath, file, mutation, podSessionID, resetDialogState, t, viewerSessionID])
 
 	return (
 		<>
-			<Button disabled={disabled} onClick={() => setOpen(true)} size="sm">
+			<Button disabled={disabled} onClick={openUploadDialog} size="sm">
 				<Upload data-icon="inline-start" />
 				{t('files.upload')}
 			</Button>
-			<Dialog onOpenChange={setOpen} open={open}>
-				<DialogContent>
+			<Dialog
+				onOpenChange={(nextOpen) => {
+					if (isUploading) {
+						return
+					}
+					setOpen(nextOpen)
+					if (!nextOpen) {
+						resetDialogState()
+					}
+				}}
+				open={open}
+			>
+				<DialogContent showCloseButton={!isUploading}>
 					<DialogHeader>
 						<DialogTitle>{t('files.upload')}</DialogTitle>
 						<DialogDescription>{currentPath}</DialogDescription>
 					</DialogHeader>
+					{isUploading
+						? (
+								<ModalStatus
+									description={t('files.uploadingDescription')}
+									title={t('files.uploadingTitle')}
+								/>
+							)
+						: null}
 					<input
 						className="hidden"
+						disabled={isUploading}
 						onChange={event => setFile(event.target.files?.[0] ?? null)}
 						ref={inputRef}
 						type="file"
 					/>
 					<div className="grid gap-3">
-						<Button onClick={() => inputRef.current?.click()} type="button" variant="outline">
+						<Button disabled={isUploading} onClick={() => inputRef.current?.click()} type="button" variant="outline">
 							{t('files.chooseFile')}
 						</Button>
 						{file
 							? (
-									<div className="rounded-md border bg-muted px-3 py-2 text-sm">
-										{file.name}
-										<span className="ml-2 text-muted-foreground">{formatBytes(file.size)}</span>
+									<div className="grid gap-2 rounded-md border bg-muted px-3 py-2 text-sm">
+										<div>
+											{file.name}
+											<span className="ml-2 text-muted-foreground">{formatBytes(file.size)}</span>
+										</div>
+										{isUploading || activeTask?.status === 'failed'
+											? (
+													<div className="grid gap-1">
+														<Progress
+															className={cn(activeTask?.status === 'failed' && 'bg-destructive/20 [&_[data-slot=progress-indicator]]:bg-destructive')}
+															value={uploadProgress}
+														/>
+														<div className="flex justify-between gap-3 text-xs text-muted-foreground">
+															<span>{activeTask?.status === 'failed' ? t('status.failed') : chunkLabel}</span>
+															<span>
+																{formatBytes(activeTask?.bytesUploaded ?? 0)}
+																{' / '}
+																{formatBytes(activeTask?.bytesTotal ?? file.size)}
+															</span>
+														</div>
+														{activeTask?.errorMessage
+															? <div className="text-xs text-destructive">{activeTask.errorMessage}</div>
+															: null}
+													</div>
+												)
+											: null}
 									</div>
 								)
 							: null}
 					</div>
 					<DialogFooter>
-						<Button onClick={() => setOpen(false)} variant="outline">
+						<Button disabled={isUploading} onClick={() => setOpen(false)} variant="outline">
 							{t('actions.cancel')}
 						</Button>
-						<Button disabled={!file || mutation.isPending} onClick={() => mutation.mutate()}>
+						<Button disabled={!file || isUploading} onClick={uploadFile}>
 							{t('files.upload')}
 						</Button>
 					</DialogFooter>
@@ -870,6 +980,47 @@ function UploadDialog({ currentPath, disabled, onUploaded, session }: DialogWith
 			</Dialog>
 		</>
 	)
+}
+
+interface ModalStatusProps {
+	description: string
+	title: string
+}
+
+function ModalStatus({ description, title }: ModalStatusProps) {
+	return (
+		<div className="rounded-md border bg-muted px-3 py-2 text-sm" role="status">
+			<div className="font-medium">{title}</div>
+			<div className="text-muted-foreground">{description}</div>
+		</div>
+	)
+}
+
+function editorLanguage(path: string) {
+	const extension = path.split('.').pop()?.toLowerCase()
+	switch (extension) {
+		case 'css':
+			return 'css'
+		case 'html':
+			return 'html'
+		case 'js':
+		case 'jsx':
+			return 'javascript'
+		case 'json':
+			return 'json'
+		case 'md':
+			return 'markdown'
+		case 'ts':
+		case 'tsx':
+			return 'typescript'
+		case 'xml':
+			return 'xml'
+		case 'yaml':
+		case 'yml':
+			return 'yaml'
+		default:
+			return 'plaintext'
+	}
 }
 
 function hasPendingBranches(branches: Record<string, BranchState | undefined>) {

@@ -253,6 +253,9 @@ func TestCommittedHookScriptAcceptsSpacedJSON(t *testing.T) {
 	if !strings.Contains(output, "hook.action=auth") {
 		t.Fatalf("output = %s", output)
 	}
+	if !strings.Contains(output, "user.hideDotfiles=false") {
+		t.Fatalf("output = %s", output)
+	}
 	if !strings.Contains(output, "user.perm.create=true") {
 		t.Fatalf("output = %s", output)
 	}

@@ -3,12 +3,29 @@ import type { FileBrowserSession } from '@/features/file-manager/types/file-mana
 
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FileManagerView } from '@/features/file-manager/components/file-manager-view'
+import { uploadActions, uploadStore } from '@/features/file-manager/stores/upload-store'
 import { pvcFixture, viewerSessionFixture, viewerTokenFixture } from '@/features/viewer/test/fakes'
 import { deriveSessionCapability } from '@/features/viewer/utils/session-capability'
 import { renderWithProviders } from '@/test/render'
+
+vi.mock('@monaco-editor/react', () => ({
+	default: ({
+		onChange,
+		value,
+	}: {
+		onChange?: (value?: string) => void
+		value?: string
+	}) => (
+		<textarea
+			aria-label="Monaco editor"
+			onChange={event => onChange?.(event.target.value)}
+			value={value ?? ''}
+		/>
+	),
+}))
 
 function resource(path: string, name: string, isDir: boolean, items?: FileBrowserResource[]): FileBrowserResource {
 	return {
@@ -73,6 +90,10 @@ function renderFileManager(session: FileBrowserSession | null, currentPath = '/'
 }
 
 describe('fileManagerView', () => {
+	beforeEach(() => {
+		uploadActions.reset()
+	})
+
 	it('hides the file table when the viewer session is not ready', () => {
 		renderFileManager(null)
 
@@ -110,6 +131,36 @@ describe('fileManagerView', () => {
 		expect(await screen.findByText('file-29.txt')).toBeInTheDocument()
 		expect(screen.getByText('file-0.txt')).toBeInTheDocument()
 		expect(screen.queryByText(/enter folder/i)).not.toBeInTheDocument()
+	})
+
+	it('does not freeze when an expanded folder response includes itself', async () => {
+		const user = userEvent.setup()
+		const list = vi.fn(async (path: string) => {
+			if (path === '/docs') {
+				return resource('/docs', 'docs', true, [
+					resource('/docs', 'docs', true),
+					resource('/docs/readme.md', 'readme.md', false),
+				])
+			}
+			return resource('/', '', true, [
+				resource('/docs', 'docs', true),
+			])
+		})
+		const session = {
+			client: {
+				list,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('docs')
+		await user.click(screen.getByRole('button', { name: /toggle folder/i }))
+
+		expect(await screen.findByText('readme.md')).toBeInTheDocument()
+		expect(screen.getAllByText('docs')).toHaveLength(1)
+		expect(list).toHaveBeenCalledWith('/docs', expect.any(AbortSignal))
 	})
 
 	it('keeps previous rows visible with a pending overlay during a path change', async () => {
@@ -246,5 +297,277 @@ describe('fileManagerView', () => {
 
 		const row = await screen.findByText('folder failed')
 		expect(within(row.closest('tr')!).getByRole('button', { name: /retry folder/i })).toBeInTheDocument()
+	})
+
+	it('creates folders through mutation options and refreshes the file tree cache', async () => {
+		const user = userEvent.setup()
+		const list = vi.fn(async () => resource('/', '', true, []))
+		const createFolder = vi.fn().mockResolvedValue(undefined)
+		const session = {
+			client: {
+				createFolder,
+				list,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText(/current directory is empty/i)
+		await user.click(screen.getByRole('button', { name: /new folder/i }))
+		await user.type(screen.getByLabelText(/folder name/i), 'test')
+		await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+		await waitFor(() => expect(createFolder).toHaveBeenCalledWith('/test'))
+		await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+	})
+
+	it('moves a directory named test to a raw trash destination path', async () => {
+		const user = userEvent.setup()
+		const move = vi.fn().mockResolvedValue(undefined)
+		const session = {
+			client: {
+				createFolder: vi.fn().mockResolvedValue(undefined),
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/test', 'test', true),
+				])),
+				move,
+				readText: vi.fn().mockResolvedValue('{"version":1,"items":[]}'),
+				saveText: vi.fn().mockResolvedValue(undefined),
+				writeText: vi.fn().mockResolvedValue(undefined),
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('test')
+		await user.click(screen.getByRole('button', { name: /delete/i }))
+		await user.click(screen.getByRole('button', { name: /^delete$/i }))
+
+		await waitFor(() => expect(move).toHaveBeenCalledWith(
+			'/test',
+			expect.stringMatching(/^\/\.storage-manager-trash\/objects\/.+-test$/),
+			true,
+		))
+		expect(move.mock.calls[0]?.[1]).not.toContain('%2F')
+	})
+
+	it('loads editable text through a query and saves it through a mutation with a modal status', async () => {
+		const user = userEvent.setup()
+		let resolveSave: (() => void) | undefined
+		const savePromise = new Promise<void>((resolve) => {
+			resolveSave = resolve
+		})
+		const readText = vi.fn().mockResolvedValue('old content')
+		const saveText = vi.fn().mockReturnValue(savePromise)
+		const session = {
+			client: {
+				downloadUrl: vi.fn(() => 'https://viewer.example.test/api/raw/readme.md?auth=token'),
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/readme.md', 'readme.md', false),
+				])),
+				readText,
+				saveText,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('readme.md')
+		await user.click(screen.getByRole('button', { name: /edit/i }))
+		expect(await screen.findByLabelText(/monaco editor/i)).toHaveValue('old content')
+		expect(readText).toHaveBeenCalledWith('/readme.md', expect.any(AbortSignal))
+
+		await user.clear(screen.getByLabelText(/monaco editor/i))
+		await user.type(screen.getByLabelText(/monaco editor/i), 'new content')
+		await user.click(screen.getByRole('button', { name: /^save$/i }))
+
+		expect(await screen.findByRole('status')).toHaveTextContent(/saving file/i)
+		expect(saveText).toHaveBeenCalledWith('/readme.md', 'new content')
+		resolveSave?.()
+		await waitFor(() => expect(screen.queryByText(/saving file/i)).not.toBeInTheDocument())
+	})
+
+	it('blocks browser editing for files larger than 32 MB', async () => {
+		const user = userEvent.setup()
+		const readText = vi.fn()
+		const session = {
+			client: {
+				downloadUrl: vi.fn(() => 'https://viewer.example.test/api/raw/large.log?auth=token'),
+				list: vi.fn(async () => resource('/', '', true, [
+					{ ...resource('/large.log', 'large.log', false), size: 33 * 1024 * 1024 },
+				])),
+				readText,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('large.log')
+		await user.click(screen.getByRole('button', { name: /edit/i }))
+
+		expect(readText).not.toHaveBeenCalled()
+		expect(screen.queryByLabelText(/monaco editor/i)).not.toBeInTheDocument()
+	})
+
+	it('uses browser-owned download URLs without fetching blobs in React', async () => {
+		const user = userEvent.setup()
+		const click = vi.fn()
+		const originalCreateElement = document.createElement.bind(document)
+		const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+			const element = originalCreateElement(tagName, options)
+			if (tagName.toLowerCase() === 'a') {
+				Object.defineProperty(element, 'click', { value: click })
+			}
+			return element
+		})
+		const downloadBlob = vi.fn()
+		const downloadUrl = vi.fn(() => 'https://viewer.example.test/api/raw/readme.md?auth=token')
+		const session = {
+			client: {
+				downloadBlob,
+				downloadUrl,
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/readme.md', 'readme.md', false),
+				])),
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		try {
+			renderFileManager(session)
+
+			await screen.findByText('readme.md')
+			await user.click(screen.getByRole('button', { name: /download/i }))
+
+			expect(downloadUrl).toHaveBeenCalledWith('/readme.md')
+			expect(downloadBlob).not.toHaveBeenCalled()
+			expect(click).toHaveBeenCalled()
+		}
+		finally {
+			createElementSpy.mockRestore()
+		}
+	})
+
+	it('shows upload progress inside the dialog and tracks the viewer session identity', async () => {
+		const user = userEvent.setup()
+		let resolveUpload: (() => void) | undefined
+		const uploadPromise = new Promise<void>((resolve) => {
+			resolveUpload = resolve
+		})
+		const uploadFile = vi.fn(async (_path, _file, options) => {
+			options.onProgress({ bytesUploaded: 4, bytesTotal: 8 })
+			await uploadPromise
+		})
+		const session = {
+			client: {
+				list: vi.fn(async () => resource('/', '', true, [])),
+				uploadFile,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderWithProviders(
+			<FileManagerView
+				currentPath="/"
+				onBackToVolumes={vi.fn()}
+				onPathChange={vi.fn()}
+				onReconnect={vi.fn()}
+				onRefreshSession={vi.fn()}
+				podSessionID="ps-1"
+				pvcName="data"
+				session={session}
+				sessionCapability={readyCapability()}
+				setSort={vi.fn()}
+				sort={{ field: 'name', direction: 'asc' }}
+				viewerSessionID="vs-1"
+			/>,
+		)
+
+		await screen.findByText(/current directory is empty/i)
+		await user.click(screen.getByRole('button', { name: /upload file/i }))
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement
+		await user.upload(input, new File(['contents'], 'demo.txt'))
+		await user.click(screen.getAllByRole('button', { name: /upload file/i }).at(-1)!)
+
+		expect(await screen.findByRole('status')).toHaveTextContent(/uploading file/i)
+		resolveUpload?.()
+		await waitFor(() => expect(uploadStore.state.tasks[0]).toMatchObject({
+			fileName: 'demo.txt',
+			podSessionID: 'ps-1',
+			pvcKey: 'pvc-1',
+			status: 'success',
+			viewerSessionID: 'vs-1',
+		}))
+	})
+
+	it('keeps upload task progress updates out of the file table render path', async () => {
+		const list = vi.fn(async () => resource('/', '', true, [
+			resource('/readme.md', 'readme.md', false),
+		]))
+		const session = {
+			client: {
+				list,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('readme.md')
+		expect(list).toHaveBeenCalledTimes(1)
+
+		uploadActions.addTask({
+			id: 'upload-1',
+			fileName: 'large.bin',
+			targetPath: '/',
+			bytesUploaded: 0,
+			bytesTotal: 100,
+			status: 'uploading',
+		})
+		uploadActions.updateTask('upload-1', {
+			bytesUploaded: 50,
+		})
+
+		expect(screen.getByText('readme.md')).toBeInTheDocument()
+		expect(await screen.findByText('large.bin')).toBeInTheDocument()
+		expect(list).toHaveBeenCalledTimes(1)
+	})
+
+	it('keeps failed upload state scoped to the current upload dialog attempt', async () => {
+		const user = userEvent.setup()
+		const uploadFile = vi.fn(async (_path, _file, options) => {
+			options.onProgress({ bytesUploaded: 0, bytesTotal: 8 })
+			throw new Error('chunk failed')
+		})
+		const session = {
+			client: {
+				list: vi.fn(async () => resource('/', '', true, [])),
+				uploadFile,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText(/current directory is empty/i)
+		await user.click(screen.getByRole('button', { name: /upload file/i }))
+		let input = document.querySelector('input[type="file"]') as HTMLInputElement
+		await user.upload(input, new File(['contents'], 'demo.txt'))
+		await user.click(screen.getAllByRole('button', { name: /upload file/i }).at(-1)!)
+
+		await waitFor(() => expect(screen.getAllByText('chunk failed').length).toBeGreaterThanOrEqual(1))
+		await user.click(screen.getByRole('button', { name: /^cancel$/i }))
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+		await user.click(screen.getByRole('button', { name: /upload file/i }))
+		input = document.querySelector('input[type="file"]') as HTMLInputElement
+		expect(input.value).toBe('')
+		const dialog = await screen.findByRole('dialog')
+		expect(within(dialog).queryByText('demo.txt')).not.toBeInTheDocument()
+		expect(within(dialog).queryByText('chunk failed')).not.toBeInTheDocument()
 	})
 })

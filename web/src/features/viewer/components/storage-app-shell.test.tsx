@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -78,6 +78,23 @@ describe('storageAppShell', () => {
 			capacity: '5Gi',
 			capacityBytes: 5 * 1024 * 1024 * 1024,
 		})))
+	})
+
+	it('orders the create PVC form as storage class before access mode', async () => {
+		const user = userEvent.setup()
+		const api = createFakeViewerAPI({
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
+
+		const dialog = screen.getByRole('dialog')
+		const storageClass = within(dialog).getByText('Storage class')
+		const accessModes = within(dialog).getByText('Access modes')
+
+		expect(storageClass.compareDocumentPosition(accessModes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 	})
 
 	it('shows localized API errors', async () => {

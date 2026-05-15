@@ -31,7 +31,7 @@ export async function readRecycleIndex(client: FileBrowserClient): Promise<Recyc
 
 export async function writeRecycleIndex(client: FileBrowserClient, items: RecycleEntry[]): Promise<void> {
 	await ensureTrashFolders(client)
-	await client.saveText(trashIndexPath, JSON.stringify({ ...emptyIndex, items }, null, 2))
+	await client.writeText(trashIndexPath, JSON.stringify({ ...emptyIndex, items }, null, 2), true)
 }
 
 export async function moveToRecycleBin(client: FileBrowserClient, path: string, isDir: boolean, size: number): Promise<RecycleEntry> {
@@ -76,7 +76,7 @@ async function ensureFolder(client: FileBrowserClient, path: string): Promise<vo
 		await client.createFolder(path)
 	}
 	catch (error) {
-		if (error instanceof FileBrowserError && error.status === 409) {
+		if (error instanceof FileBrowserError && (error.status === 404 || error.status === 409)) {
 			return
 		}
 		throw error

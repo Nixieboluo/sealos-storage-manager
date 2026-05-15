@@ -1,8 +1,10 @@
 import type { ViewerAPI } from '@/features/viewer/types/viewer'
 
-import { useEffect } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 
 import { viewerApi } from '@/features/viewer/api/viewer-api'
+import { heartbeatViewerSessionMutationOptions } from '@/features/viewer/api/viewer-mutations'
 
 interface UseSessionHeartbeatInput {
 	api?: ViewerAPI
@@ -19,6 +21,16 @@ export function useSessionHeartbeat({
 	onError,
 	viewerSessionID,
 }: UseSessionHeartbeatInput) {
+	const queryClient = useQueryClient()
+	const heartbeat = useMutation(heartbeatViewerSessionMutationOptions(queryClient, api))
+	const heartbeatViewerSessionRef = useRef(heartbeat.mutateAsync)
+	const onErrorRef = useRef(onError)
+
+	useEffect(() => {
+		heartbeatViewerSessionRef.current = heartbeat.mutateAsync
+		onErrorRef.current = onError
+	}, [heartbeat.mutateAsync, onError])
+
 	useEffect(() => {
 		if (!enabled || !viewerSessionID) {
 			return undefined
@@ -26,9 +38,9 @@ export function useSessionHeartbeat({
 
 		let cancelled = false
 		const sendHeartbeat = () => {
-			void api.heartbeatViewerSession(viewerSessionID).catch((error: unknown) => {
+			void heartbeatViewerSessionRef.current(viewerSessionID).catch((error: unknown) => {
 				if (!cancelled) {
-					onError?.(error)
+					onErrorRef.current?.(error)
 				}
 			})
 		}
@@ -39,5 +51,5 @@ export function useSessionHeartbeat({
 			cancelled = true
 			window.clearInterval(id)
 		}
-	}, [api, enabled, intervalMs, onError, viewerSessionID])
+	}, [enabled, intervalMs, viewerSessionID])
 }

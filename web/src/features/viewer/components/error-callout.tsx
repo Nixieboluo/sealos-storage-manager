@@ -12,8 +12,10 @@ interface ErrorCalloutProps {
 export function ErrorCallout({ children, title }: ErrorCalloutProps) {
 	return (
 		<Alert variant="destructive">
-			<AlertTriangle />
-			<AlertTitle>{title}</AlertTitle>
+			<AlertTitle className="flex flex-row items-center gap-2">
+				<AlertTriangle className="size-4" />
+				{title}
+			</AlertTitle>
 			<AlertDescription>{children}</AlertDescription>
 		</Alert>
 	)

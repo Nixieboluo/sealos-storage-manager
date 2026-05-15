@@ -1,6 +1,6 @@
 import type { UploadOptions } from './upload'
 import { errorFromResponse } from './errors'
-import { joinPath, normalizePath } from './path'
+import { encodePath, joinPath } from './path'
 import { shouldUseTus, uploadTus } from './upload'
 
 export interface FileBrowserClientOptions {
@@ -40,20 +40,25 @@ export class FileBrowserClient {
 	}
 
 	async list(path = '/', signal?: AbortSignal): Promise<FileBrowserResource> {
-		return this.json<FileBrowserResource>('GET', `/api/resources${normalizePath(path)}`, { signal })
+		return this.json<FileBrowserResource>('GET', `/api/resources${encodePath(path)}`, { signal })
 	}
 
 	async listRecursive(path = '/', signal?: AbortSignal): Promise<RecursiveEntry[]> {
-		return this.json<RecursiveEntry[]>('GET', `/api/resources/recursive${normalizePath(path)}`, { signal })
+		return this.json<RecursiveEntry[]>('GET', `/api/resources/recursive${encodePath(path)}`, { signal })
 	}
 
 	downloadUrl(path: string, inline = false): string {
-		const query = inline ? '?inline=true' : ''
-		return `${this.baseUrl}/api/raw${normalizePath(path)}${query}`
+		const query = new URLSearchParams({
+			auth: this.token,
+		})
+		if (inline) {
+			query.set('inline', 'true')
+		}
+		return `${this.baseUrl}/api/raw${encodePath(path)}?${query.toString()}`
 	}
 
 	async createFolder(path: string): Promise<void> {
-		const folderPath = normalizePath(path).replace(/\/?$/, '/')
+		const folderPath = encodePath(path).replace(/\/?$/, '/')
 		await this.request('POST', `/api/resources${folderPath}`)
 	}
 
@@ -63,13 +68,14 @@ export class FileBrowserClient {
 			await uploadTus({
 				...options,
 				endpoint: this.baseUrl,
+				fetcher: this.fetcher,
 				file,
 				path: filePath,
 				token: this.token,
 			})
 			return
 		}
-		await this.request('POST', `/api/resources${filePath}?override=${options.overwrite === true}`, {
+		await this.request('POST', `/api/resources${encodePath(filePath)}?override=${options.overwrite === true}`, {
 			body: file,
 			signal: options.signal,
 		})
@@ -77,17 +83,21 @@ export class FileBrowserClient {
 	}
 
 	async readText(path: string, signal?: AbortSignal): Promise<string> {
-		const response = await this.request('GET', `/api/raw${normalizePath(path)}?inline=true`, { signal })
+		const response = await this.request('GET', `/api/raw${encodePath(path)}?inline=true`, { signal })
 		return response.text()
 	}
 
 	async downloadBlob(path: string, signal?: AbortSignal): Promise<Blob> {
-		const response = await this.request('GET', `/api/raw${normalizePath(path)}`, { signal })
+		const response = await this.request('GET', `/api/raw${encodePath(path)}`, { signal })
 		return response.blob()
 	}
 
 	async saveText(path: string, content: string): Promise<void> {
-		await this.request('PUT', `/api/resources${normalizePath(path)}`, { body: content })
+		await this.request('PUT', `/api/resources${encodePath(path)}`, { body: content })
+	}
+
+	async writeText(path: string, content: string, overwrite = true): Promise<void> {
+		await this.request('POST', `/api/resources${encodePath(path)}?override=${overwrite}`, { body: content })
 	}
 
 	async move(source: string, destination: string, overwrite = false): Promise<void> {
@@ -99,17 +109,13 @@ export class FileBrowserClient {
 	}
 
 	async deletePermanent(path: string): Promise<void> {
-		await this.request('DELETE', `/api/resources${normalizePath(path)}`)
+		await this.request('DELETE', `/api/resources${encodePath(path)}`)
 	}
 
 	private async patchAction(action: 'rename' | 'copy', source: string, destination: string, overwrite: boolean): Promise<void> {
-		const query = new URLSearchParams({
-			action,
-			destination: normalizePath(destination),
-			override: String(overwrite),
-			rename: 'false',
-		})
-		await this.request('PATCH', `/api/resources${normalizePath(source)}?${query.toString()}`)
+		const destinationParam = encodeURIComponent(encodePath(destination))
+		const query = `action=${action}&destination=${destinationParam}&override=${overwrite}&rename=false`
+		await this.request('PATCH', `/api/resources${encodePath(source)}?${query}`)
 	}
 
 	private async json<T>(method: string, path: string, init: RequestInit = {}): Promise<T> {

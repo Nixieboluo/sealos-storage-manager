@@ -59,6 +59,7 @@ viewer:
 
     echo "hook.action=auth"
     echo "user.scope=/"
+    echo "user.hideDotfiles=false"
     echo "user.perm.admin=false"
     echo "user.perm.execute=false"
     echo "user.perm.share=false"

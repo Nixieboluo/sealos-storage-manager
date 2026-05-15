@@ -14,11 +14,28 @@ export interface FileSortState {
 	field: FileSortField
 }
 
-export function flattenResources(resource: FileBrowserResource, depth = 0): FileEntry[] {
+const defaultMaxFileTreeRows = 2_000
+const defaultMaxFileTreeDepth = 32
+
+export interface FlattenResourcesOptions {
+	maxEntries?: number
+}
+
+export function flattenResources(
+	resource: FileBrowserResource,
+	depth = 0,
+	options: FlattenResourcesOptions = {},
+): FileEntry[] {
 	const items = resource.items ?? []
 	const entries: FileEntry[] = []
+	const maxEntries = options.maxEntries ?? defaultMaxFileTreeRows
+	const resourcePath = normalizePath(resource.path)
 	for (const item of items) {
-		if (normalizePath(item.path) === trashRootPath) {
+		if (entries.length >= maxEntries) {
+			break
+		}
+		const itemPath = normalizePath(item.path)
+		if (itemPath === trashRootPath || itemPath === resourcePath) {
 			continue
 		}
 		entries.push({
@@ -26,7 +43,7 @@ export function flattenResources(resource: FileBrowserResource, depth = 0): File
 			isDir: item.isDir,
 			modified: item.modified,
 			name: item.name,
-			path: normalizePath(item.path),
+			path: itemPath,
 			size: item.size,
 			type: item.isDir ? 'directory' : 'file',
 		})
@@ -63,14 +80,34 @@ export interface ExpandedFolderBranch {
 
 export type ExpandedFolderMap = Record<string, ExpandedFolderBranch | undefined>
 
+export interface BuildFileTableRowsOptions {
+	maxDepth?: number
+	maxRows?: number
+}
+
 export function buildFileTableRows(
 	entries: FileEntry[],
 	expandedPaths: Set<string>,
 	branches: ExpandedFolderMap,
+	options: BuildFileTableRowsOptions = {},
 ): FileTableRow[] {
 	const rows: FileTableRow[] = []
-	appendRows(rows, entries, expandedPaths, branches)
+	appendRows(rows, entries, expandedPaths, branches, {
+		ancestorPaths: new Set<string>(),
+		maxDepth: options.maxDepth ?? defaultMaxFileTreeDepth,
+		maxRows: options.maxRows ?? defaultMaxFileTreeRows,
+		parentPath: null,
+		seenPaths: new Set<string>(),
+	})
 	return rows
+}
+
+interface AppendRowsState {
+	ancestorPaths: Set<string>
+	maxDepth: number
+	maxRows: number
+	parentPath: string | null
+	seenPaths: Set<string>
 }
 
 function appendRows(
@@ -78,8 +115,21 @@ function appendRows(
 	entries: FileEntry[],
 	expandedPaths: Set<string>,
 	branches: ExpandedFolderMap,
+	state: AppendRowsState,
 ) {
 	for (const entry of entries) {
+		if (rows.length >= state.maxRows) {
+			return
+		}
+		if (
+			state.ancestorPaths.has(entry.path)
+			|| state.seenPaths.has(entry.path)
+			|| !isDescendantEntry(state.parentPath, entry.path)
+			|| entry.depth > state.maxDepth
+		) {
+			continue
+		}
+		state.seenPaths.add(entry.path)
 		rows.push({
 			entry,
 			id: `resource:${entry.path}`,
@@ -90,8 +140,15 @@ function appendRows(
 			continue
 		}
 
+		if (entry.depth >= state.maxDepth) {
+			continue
+		}
+
 		const branch = branches[entry.path]
 		if (branch?.isLoading) {
+			if (rows.length >= state.maxRows) {
+				return
+			}
 			rows.push({
 				depth: entry.depth + 1,
 				id: `branch-loading:${entry.path}`,
@@ -102,6 +159,9 @@ function appendRows(
 		}
 
 		if (branch?.error) {
+			if (rows.length >= state.maxRows) {
+				return
+			}
 			rows.push({
 				depth: entry.depth + 1,
 				error: branch.error,
@@ -112,8 +172,25 @@ function appendRows(
 			continue
 		}
 
-		appendRows(rows, branch?.entries ?? [], expandedPaths, branches)
+		appendRows(
+			rows,
+			branch?.entries ?? [],
+			expandedPaths,
+			branches,
+			{
+				...state,
+				ancestorPaths: new Set([...state.ancestorPaths, entry.path]),
+				parentPath: entry.path,
+			},
+		)
 	}
+}
+
+function isDescendantEntry(parent: string | null, child: string) {
+	if (parent === null || parent === '/') {
+		return true
+	}
+	return child.startsWith(`${parent}/`)
 }
 
 export function nextSortState(current: FileSortState, field: FileSortField): FileSortState {
@@ -148,5 +225,5 @@ export function remainingTrashDays(deletedAt: string, retentionDays = 30) {
 export function trashObjectPath(originalPath: string, id: string) {
 	const normalized = normalizePath(originalPath)
 	const name = fileNameFromPath(normalized)
-	return `${trashRootPath}/objects/${id}-${encodeURIComponent(name)}`
+	return `${trashRootPath}/objects/${id}-${name}`
 }

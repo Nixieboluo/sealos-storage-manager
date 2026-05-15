@@ -25,10 +25,12 @@ vi.mock('tus-js-client', () => {
 		start() {
 			tusState.start()
 			const options = tusState.options as {
+				onChunkComplete?: (chunkSize: number, bytesUploaded: number, bytesTotal: number) => void
 				onProgress?: (bytesUploaded: number, bytesTotal: number) => void
 				onSuccess?: () => void
 			}
 			options.onProgress?.(4, 8)
+			options.onChunkComplete?.(4, 4, 8)
 			options.onSuccess?.()
 		}
 	}
@@ -55,9 +57,11 @@ describe('tUS upload policy', () => {
 
 	it('configures File Browser TUS uploads without persistent resume fingerprints', async () => {
 		const onProgress = vi.fn()
+		const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
 
 		await uploadTus({
 			endpoint: 'https://viewer.example.test/',
+			fetcher,
 			token: 'token',
 			file: new Blob(['payload']),
 			path: '/data.bin',
@@ -68,8 +72,15 @@ describe('tUS upload policy', () => {
 		})
 
 		expect(tusState.start).toHaveBeenCalled()
+		expect(fetcher).toHaveBeenCalledWith('https://viewer.example.test/api/tus/data.bin?override=true', expect.objectContaining({
+			method: 'POST',
+			headers: expect.objectContaining({
+				'Authorization': 'Bearer token',
+				'X-Auth': 'token',
+			}),
+		}))
 		expect(tusState.options).toMatchObject({
-			endpoint: 'https://viewer.example.test/api/tus/data.bin?override=true',
+			uploadUrl: 'https://viewer.example.test/api/tus/data.bin?override=true',
 			chunkSize: 8,
 			retryDelays: [0, 1000],
 			parallelUploads: 1,
@@ -79,12 +90,57 @@ describe('tUS upload policy', () => {
 				'X-Auth': 'token',
 			},
 		})
-		expect(onProgress).toHaveBeenCalledWith({ bytesUploaded: 4, bytesTotal: 8 })
+		expect(onProgress).toHaveBeenCalledTimes(1)
+		expect(onProgress).toHaveBeenCalledWith({ bytesUploaded: 4, bytesTotal: 8, chunkSize: 4 })
+	})
+
+	it('encodes File Browser TUS paths by segment before creating the upload', async () => {
+		const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
+
+		await uploadTus({
+			endpoint: 'https://viewer.example.test',
+			fetcher,
+			token: 'token',
+			file: new Blob(['payload']),
+			path: '/a folder/中文/% done.bin',
+		})
+
+		expect(fetcher).toHaveBeenCalledWith(
+			'https://viewer.example.test/api/tus/a%20folder/%E4%B8%AD%E6%96%87/%25%20done.bin?override=false',
+			expect.objectContaining({ method: 'POST' }),
+		)
+		expect(tusState.options).toMatchObject({
+			uploadUrl: 'https://viewer.example.test/api/tus/a%20folder/%E4%B8%AD%E6%96%87/%25%20done.bin?override=false',
+		})
+	})
+
+	it('fails before starting when File Browser cannot create the TUS upload', async () => {
+		const fetcher = vi.fn().mockResolvedValue(new Response('missing parent', {
+			status: 404,
+			statusText: 'Not Found',
+		}))
+
+		await expect(uploadTus({
+			endpoint: 'https://viewer.example.test',
+			fetcher,
+			token: 'token',
+			file: new Blob(['payload']),
+			path: '/data.bin',
+		})).rejects.toMatchObject({
+			code: 'TUS_UPLOAD_FAILED',
+			message: 'missing parent',
+			status: 404,
+		})
+
+		expect(tusState.start).not.toHaveBeenCalled()
 	})
 
 	it('does not retry File Browser conflict responses', async () => {
+		const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
+
 		await uploadTus({
 			endpoint: 'https://viewer.example.test',
+			fetcher,
 			token: 'token',
 			file: new Blob(['payload']),
 			path: '/data.bin',

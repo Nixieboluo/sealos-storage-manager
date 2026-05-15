@@ -19,6 +19,7 @@ export function createViewerSessionMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.createViewerSession(),
 		mutationFn: (input: CreateViewerSessionInput) =>
 			api.createViewerSession(input),
 		onSuccess: (viewerSession) => {
@@ -36,6 +37,7 @@ export function createPVCMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.createPVC(),
 		mutationFn: (input: CreatePVCInput) => api.createPVC(input),
 		onMutate: async (input) => {
 			const key = viewerKeys.pvcs(input.namespace)
@@ -91,6 +93,7 @@ export function deletePVCMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.deletePVC(),
 		mutationFn: (input: DeletePVCInput) => api.deletePVC(input),
 		onMutate: async (input) => {
 			const key = viewerKeys.pvcs(input.namespace)
@@ -120,6 +123,7 @@ export function expandPVCMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.expandPVC(),
 		mutationFn: (input: ExpandPVCInput) => api.expandPVC(input),
 		onMutate: async (input) => {
 			const key = viewerKeys.pvcs(input.namespace)
@@ -162,6 +166,7 @@ export function expandPVCMutationOptions(
 
 export function issueViewerTokenMutationOptions(api: ViewerAPI = viewerApi) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.issueViewerToken(),
 		mutationFn: (viewerSessionID: string) => api.issueViewerToken(viewerSessionID),
 	})
 }
@@ -171,6 +176,7 @@ export function heartbeatViewerSessionMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.heartbeatViewerSession(),
 		mutationFn: (viewerSessionID: string) =>
 			api.heartbeatViewerSession(viewerSessionID),
 		onMutate: async (viewerSessionID) => {
@@ -202,6 +208,7 @@ export function closeViewerSessionMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.closeViewerSession(),
 		mutationFn: (viewerSessionID: string) =>
 			api.closeViewerSession(viewerSessionID),
 		onMutate: async (viewerSessionID) => {
@@ -238,6 +245,7 @@ export function closePodSessionMutationOptions(
 	api: ViewerAPI = viewerApi,
 ) {
 	return mutationOptions({
+		mutationKey: viewerKeys.mutations.closePodSession(),
 		mutationFn: (podSessionID: string) => api.closePodSession(podSessionID),
 		onSettled: (_data, _error, podSessionID) => {
 			void queryClient.invalidateQueries({

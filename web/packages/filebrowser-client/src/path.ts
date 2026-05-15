@@ -6,8 +6,19 @@ export function normalizePath(path: string): string {
 	const segments = trimmed
 		.split('/')
 		.filter(Boolean)
-		.map(segment => encodeURIComponent(segment))
 	return `/${segments.join('/')}`
+}
+
+export function encodePath(path: string): string {
+	const normalized = normalizePath(path)
+	if (normalized === '/') {
+		return '/'
+	}
+	return `/${normalized
+		.split('/')
+		.filter(Boolean)
+		.map(segment => encodeURIComponent(segment))
+		.join('/')}`
 }
 
 export function joinPath(parent: string, name: string): string {

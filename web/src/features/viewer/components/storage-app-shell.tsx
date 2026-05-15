@@ -7,6 +7,7 @@ import type { ViewerView } from '@/features/viewer/stores/viewer-ui-store'
 import type { PVC, StorageClass, ViewerAPI, ViewerSession, ViewerToken } from '@/features/viewer/types/viewer'
 import type { ViewerFlowStatus } from '@/features/viewer/utils/session-capability'
 import { FileBrowserClient } from '@sealos-storage-manager/filebrowser-client'
+import { useForm } from '@tanstack/react-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
 	Database,
@@ -83,6 +84,13 @@ interface CreatePVCForm {
 	capacityGi: number
 	name: string
 	storageClassName: string
+}
+
+const defaultCreatePVCForm: CreatePVCForm = {
+	accessMode: 'ReadWriteOnce',
+	capacityGi: 10,
+	name: '',
+	storageClassName: '__default__',
 }
 
 interface CreatePVCVariables {
@@ -364,11 +372,13 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 									}}
 									onReconnect={handleReconnect}
 									onRefreshSession={refreshActiveSession}
+									podSessionID={viewerSession?.pod_session_id ?? null}
 									pvcName={selectedPVC?.name}
 									session={displayFileSession}
 									sessionCapability={sessionCapability}
 									setSort={setSort}
 									sort={sort}
+									viewerSessionID={viewerSession?.id ?? null}
 								/>
 							</TabsContent>
 							<TabsContent className="m-0 flex h-full min-h-0 flex-col" value="trash">
@@ -661,34 +671,26 @@ function CreatePVCDialog({
 	storageClasses,
 }: CreatePVCDialogProps) {
 	const { t } = useTranslation()
-	const [form, setForm] = useState<CreatePVCForm>({
-		name: '',
-		capacityGi: 10,
-		accessMode: 'ReadWriteOnce',
-		storageClassName: '__default__',
+	const form = useForm({
+		defaultValues: defaultCreatePVCForm,
+		onSubmit: ({ value }) => {
+			mutation.mutate({
+				namespace,
+				name: value.name.trim(),
+				capacity: `${value.capacityGi}Gi`,
+				capacityBytes: value.capacityGi * 1024 * 1024 * 1024,
+				accessModes: [value.accessMode],
+				storageClassName: value.storageClassName === '__default__' ? undefined : value.storageClassName,
+			}, {
+				onSuccess: () => {
+					toast.success(t('volumes.created'))
+					form.reset(defaultCreatePVCForm)
+					onOpenChange(false)
+				},
+				onError: error => toast.error(translateViewerError(error, t)),
+			})
+		},
 	})
-
-	function update(patch: Partial<CreatePVCForm>) {
-		setForm(current => ({ ...current, ...patch }))
-	}
-
-	function submit() {
-		mutation.mutate({
-			namespace,
-			name: form.name,
-			capacity: `${form.capacityGi}Gi`,
-			capacityBytes: form.capacityGi * 1024 * 1024 * 1024,
-			accessModes: [form.accessMode],
-			storageClassName: form.storageClassName === '__default__' ? undefined : form.storageClassName,
-		}, {
-			onSuccess: () => {
-				toast.success(t('volumes.created'))
-				setForm(current => ({ ...current, name: '' }))
-				onOpenChange(false)
-			},
-			onError: error => toast.error(translateViewerError(error, t)),
-		})
-	}
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
@@ -697,10 +699,36 @@ function CreatePVCDialog({
 					<DialogTitle>{t('volumes.create')}</DialogTitle>
 					<DialogDescription>{t('volumes.createDescription')}</DialogDescription>
 				</DialogHeader>
-				<div className="grid gap-4">
-					<FormField id="pvc-name" label={t('volumes.name')}>
-						<Input id="pvc-name" onChange={event => update({ name: event.target.value })} value={form.name} />
-					</FormField>
+				<form
+					className="grid gap-4"
+					onSubmit={(event) => {
+						event.preventDefault()
+						void form.handleSubmit()
+					}}
+				>
+					<form.Field
+						name="name"
+						validators={{
+							onChange: ({ value }) => value.trim().length === 0 ? t('volumes.nameRequired') : undefined,
+						}}
+					>
+						{field => (
+							<FormField
+								error={field.state.meta.errorMap.onChange}
+								id="pvc-name"
+								label={t('volumes.name')}
+							>
+								<Input
+									aria-invalid={field.state.meta.errorMap.onChange ? true : undefined}
+									id="pvc-name"
+									name={field.name}
+									onBlur={field.handleBlur}
+									onChange={event => field.handleChange(event.target.value)}
+									value={field.state.value}
+								/>
+							</FormField>
+						)}
+					</form.Field>
 					<div className="rounded-md border bg-muted px-3 py-2 text-sm">
 						<span className="text-muted-foreground">
 							{t('common.namespace')}
@@ -709,59 +737,97 @@ function CreatePVCDialog({
 						</span>
 						<span className="font-medium">{namespace || t('common.loading')}</span>
 					</div>
-					<FormField id="pvc-capacity" label={t('viewer.capacity')}>
-						<Input
-							id="pvc-capacity"
-							min={1}
-							onChange={event => update({ capacityGi: Number(event.target.value) })}
-							type="number"
-							value={form.capacityGi}
-						/>
-					</FormField>
-					<FormField id="pvc-access-mode" label={t('viewer.accessModes')}>
-						<Select onValueChange={value => update({ accessMode: value })} value={form.accessMode}>
-							<SelectTrigger id="pvc-access-mode">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									<SelectItem value="ReadWriteOnce">ReadWriteOnce</SelectItem>
-									<SelectItem value="ReadOnlyMany">ReadOnlyMany</SelectItem>
-									<SelectItem value="ReadWriteMany">ReadWriteMany</SelectItem>
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-					</FormField>
-					<FormField id="pvc-storage-class" label={t('volumes.storageClass')}>
-						<Select onValueChange={value => update({ storageClassName: value })} value={form.storageClassName}>
-							<SelectTrigger id="pvc-storage-class">
-								<SelectValue placeholder={t('volumes.defaultStorageClass')} />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									<SelectItem value="__default__">{t('volumes.defaultStorageClass')}</SelectItem>
-									{storageClasses.map(storageClass => (
-										<SelectItem key={storageClass.name} value={storageClass.name}>
-											{storageClass.name}
-											{storageClass.is_default ? ` · ${t('common.default')}` : ''}
-										</SelectItem>
-									))}
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-					</FormField>
-				</div>
-				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="outline">
-						{t('actions.cancel')}
-					</Button>
-					<Button
-						disabled={mutation.isPending || !form.name || !namespace || form.capacityGi <= 0}
-						onClick={submit}
+					<form.Field
+						name="capacityGi"
+						validators={{
+							onChange: ({ value }) => value > 0 ? undefined : t('volumes.capacityRequired'),
+						}}
 					>
-						{t('actions.create')}
-					</Button>
-				</DialogFooter>
+						{field => (
+							<FormField
+								error={field.state.meta.errorMap.onChange}
+								id="pvc-capacity"
+								label={t('viewer.capacity')}
+							>
+								<Input
+									aria-invalid={field.state.meta.errorMap.onChange ? true : undefined}
+									id="pvc-capacity"
+									min={1}
+									name={field.name}
+									onBlur={field.handleBlur}
+									onChange={event => field.handleChange(Number(event.target.value))}
+									type="number"
+									value={field.state.value}
+								/>
+							</FormField>
+						)}
+					</form.Field>
+					<form.Field name="storageClassName">
+						{field => (
+							<FormField id="pvc-storage-class" label={t('volumes.storageClass')}>
+								<Select onValueChange={value => field.handleChange(value)} value={field.state.value}>
+									<SelectTrigger id="pvc-storage-class">
+										<SelectValue placeholder={t('volumes.defaultStorageClass')} />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectGroup>
+											<SelectItem value="__default__">{t('volumes.defaultStorageClass')}</SelectItem>
+											{storageClasses.map(storageClass => (
+												<SelectItem key={storageClass.name} value={storageClass.name}>
+													{storageClass.name}
+													{storageClass.is_default ? ` · ${t('common.default')}` : ''}
+												</SelectItem>
+											))}
+										</SelectGroup>
+									</SelectContent>
+								</Select>
+							</FormField>
+						)}
+					</form.Field>
+					<form.Field name="accessMode">
+						{field => (
+							<FormField id="pvc-access-mode" label={t('viewer.accessModes')}>
+								<Select onValueChange={value => field.handleChange(value)} value={field.state.value}>
+									<SelectTrigger id="pvc-access-mode">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectGroup>
+											<SelectItem value="ReadWriteOnce">ReadWriteOnce</SelectItem>
+											<SelectItem value="ReadOnlyMany">ReadOnlyMany</SelectItem>
+											<SelectItem value="ReadWriteMany">ReadWriteMany</SelectItem>
+										</SelectGroup>
+									</SelectContent>
+								</Select>
+							</FormField>
+						)}
+					</form.Field>
+					<DialogFooter>
+						<Button onClick={() => onOpenChange(false)} type="button" variant="outline">
+							{t('actions.cancel')}
+						</Button>
+						<form.Subscribe selector={state => ({
+							canSubmit: state.canSubmit,
+							values: state.values,
+						})}
+						>
+							{({ canSubmit, values }) => (
+								<Button
+									disabled={
+										mutation.isPending
+										|| !canSubmit
+										|| !namespace
+										|| values.name.trim().length === 0
+										|| values.capacityGi <= 0
+									}
+									type="submit"
+								>
+									{t('actions.create')}
+								</Button>
+							)}
+						</form.Subscribe>
+					</DialogFooter>
+				</form>
 			</DialogContent>
 		</Dialog>
 	)
@@ -769,17 +835,22 @@ function CreatePVCDialog({
 
 function FormField({
 	children,
+	error,
 	id,
 	label,
 }: {
 	children: React.ReactNode
+	error?: unknown
 	id: string
 	label: string
 }) {
+	const errorText = typeof error === 'string' ? error : ''
+
 	return (
-		<div className="grid gap-2">
+		<div className="grid gap-2" data-invalid={errorText ? true : undefined}>
 			<Label htmlFor={id}>{label}</Label>
 			{children}
+			{errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
 		</div>
 	)
 }
