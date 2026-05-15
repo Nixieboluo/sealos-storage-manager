@@ -93,6 +93,15 @@ func TestEnsurePodSessionCreatesResources(t *testing.T) {
 		t.Fatalf("ingress was not created: %v", err)
 	}
 	assertOwnedByPod(t, ingress.OwnerReferences, pod)
+	if ingress.Annotations["nginx.ingress.kubernetes.io/enable-cors"] != "true" {
+		t.Fatalf("ingress CORS annotations missing: %#v", ingress.Annotations)
+	}
+	if !strings.Contains(ingress.Annotations["nginx.ingress.kubernetes.io/cors-allow-headers"], "Tus-Resumable") {
+		t.Fatalf("ingress CORS annotations do not allow TUS headers: %#v", ingress.Annotations)
+	}
+	if ingress.Annotations["nginx.ingress.kubernetes.io/proxy-body-size"] != "0" {
+		t.Fatalf("ingress does not allow large upload bodies: %#v", ingress.Annotations)
+	}
 }
 
 func TestEnsurePodSessionReusesExistingViewerPod(t *testing.T) {

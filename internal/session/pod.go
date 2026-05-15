@@ -31,6 +31,18 @@ const (
 	componentViewer   = "viewer"
 )
 
+var viewerIngressCORSAnnotations = map[string]string{
+	"nginx.ingress.kubernetes.io/enable-cors":             "true",
+	"nginx.ingress.kubernetes.io/cors-allow-origin":       "*",
+	"nginx.ingress.kubernetes.io/cors-allow-credentials":  "false",
+	"nginx.ingress.kubernetes.io/cors-allow-methods":      "GET, PUT, POST, DELETE, PATCH, OPTIONS",
+	"nginx.ingress.kubernetes.io/cors-allow-headers":      "Authorization, X-Auth, Content-Type, Cache-Control, Pragma, Tus-Resumable, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Defer-Length, Upload-Concat, Upload-Checksum, X-HTTP-Method-Override",
+	"nginx.ingress.kubernetes.io/cors-expose-headers":     "Location, Tus-Resumable, Upload-Offset, Upload-Length, Upload-Metadata, Upload-Defer-Length, Upload-Concat, Upload-Expires",
+	"nginx.ingress.kubernetes.io/cors-max-age":            "600",
+	"nginx.ingress.kubernetes.io/proxy-body-size":         "0",
+	"nginx.ingress.kubernetes.io/proxy-request-buffering": "off",
+}
+
 var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]+`)
 
 type PodService struct {
@@ -573,6 +585,7 @@ func (s *PodService) buildIngress(
 			Namespace:       session.Namespace,
 			Name:            session.ServiceName,
 			Labels:          managedLabels(session),
+			Annotations:     viewerIngressAnnotations(),
 			OwnerReferences: []metav1.OwnerReference{owner},
 		},
 		Spec: networkingv1.IngressSpec{
@@ -611,6 +624,14 @@ func (s *PodService) buildIngress(
 		}
 	}
 	return ingress, nil
+}
+
+func viewerIngressAnnotations() map[string]string {
+	annotations := make(map[string]string, len(viewerIngressCORSAnnotations))
+	for key, value := range viewerIngressCORSAnnotations {
+		annotations[key] = value
+	}
+	return annotations
 }
 
 func (s *PodService) viewerURL(id string) (string, error) {
