@@ -2,8 +2,10 @@ import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
 import type { FileBrowserSession } from '@/features/file-manager/types/file-manager'
 import type { FileSortState } from '@/features/file-manager/utils/file-tree'
 
+import type { ViewerFlowSnapshot } from '@/features/viewer/components/viewer-launch-panel'
 import type { ViewerView } from '@/features/viewer/stores/viewer-ui-store'
-import type { PVC, StorageClass, ViewerAPI, ViewerToken } from '@/features/viewer/types/viewer'
+import type { PVC, StorageClass, ViewerAPI, ViewerSession, ViewerToken } from '@/features/viewer/types/viewer'
+import type { ViewerFlowStatus } from '@/features/viewer/utils/session-capability'
 import { FileBrowserClient } from '@sealos-storage-manager/filebrowser-client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -16,7 +18,7 @@ import {
 	RefreshCw,
 	Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -69,6 +71,7 @@ import { PVCStatusBadge } from '@/features/viewer/components/pvc-status-badge'
 import { ViewerLaunchPanel } from '@/features/viewer/components/viewer-launch-panel'
 import { useViewerNamespace, useViewerSearch, useViewerView, viewerUIStore } from '@/features/viewer/stores/viewer-ui-store'
 import { formatBytes } from '@/features/viewer/utils/format-capacity'
+import { deriveSessionCapability } from '@/features/viewer/utils/session-capability'
 import { canLaunchViewer } from '@/features/viewer/utils/viewer-status'
 
 interface StorageAppShellProps {
@@ -108,14 +111,31 @@ interface DeletePVCState {
 	pvc: PVC
 }
 
+interface ViewerFlowState {
+	error: ViewerFlowSnapshot['error']
+	isReconnecting: ViewerFlowSnapshot['isReconnecting']
+	manualCloseKind: ViewerFlowSnapshot['manualCloseKind']
+	status: ViewerFlowStatus
+}
+
+const idleViewerFlowState: ViewerFlowState = {
+	error: null,
+	isReconnecting: false,
+	manualCloseKind: null,
+	status: 'idle',
+}
+
 export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const namespace = useViewerNamespace()
 	const view = useViewerView()
 	const queryClient = useQueryClient()
+	const recoverRef = useRef<ViewerFlowSnapshot['recover'] | null>(null)
+	const lastFileSessionRef = useRef<FileBrowserSession | null>(null)
 	const [launchKey, setLaunchKey] = useState<string | null>(null)
 	const [selectedPVC, setSelectedPVC] = useState<PVC | null>(null)
 	const [token, setToken] = useState<ViewerToken | null>(null)
-	const [sessionStatus, setSessionStatus] = useState('idle')
+	const [viewerSession, setViewerSession] = useState<ViewerSession | null>(null)
+	const [viewerFlow, setViewerFlow] = useState<ViewerFlowState>(idleViewerFlowState)
 	const [currentPath, setCurrentPath] = useState('/')
 	const [sort, setSort] = useState<FileSortState>({ field: 'name', direction: 'asc' })
 	const [createOpen, setCreateOpen] = useState(false)
@@ -129,7 +149,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const storageClassesQuery = useQuery(storageClassListQueryOptions(api))
 	const pvcs = useMemo(() => pvcQuery.data ?? [], [pvcQuery.data])
 	const fileSession = useMemo<FileBrowserSession | null>(() => {
-		if (!token || !selectedPVC) {
+		if (!token || !selectedPVC || viewerSession?.status !== 'ready' || !viewerSession.token_ready) {
 			return null
 		}
 		return {
@@ -139,7 +159,24 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 			}),
 			pvcKey: selectedPVC.uid,
 		}
-	}, [selectedPVC, token])
+	}, [selectedPVC, token, viewerSession])
+	const sessionCapability = useMemo(
+		() => deriveSessionCapability({
+			error: viewerFlow.error,
+			isReconnecting: viewerFlow.isReconnecting,
+			manualCloseKind: viewerFlow.manualCloseKind,
+			selectedPVC,
+			session: viewerSession,
+			status: viewerFlow.status,
+			token,
+		}),
+		[selectedPVC, token, viewerFlow, viewerSession],
+	)
+	const displayFileSession = fileSession ?? (
+		sessionCapability.canShowFileList ? lastFileSessionRef.current : null
+	)
+	const showSessionNavigation = sessionCapability.canShowSessionNavigation
+	const showFileNavigation = sessionCapability.canShowFileList
 
 	const createPVC = useMutation(createPVCMutationOptions(queryClient, api))
 	const expandPVCMutation = useMutation(expandPVCMutationOptions(queryClient, api))
@@ -154,6 +191,9 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	function openFiles(pvc: PVC) {
 		setSelectedPVC(pvc)
 		setToken(null)
+		setViewerSession(null)
+		lastFileSessionRef.current = null
+		setViewerFlow(idleViewerFlowState)
 		setCurrentPath('/')
 		setLaunchKey(`${pvc.uid}:${Date.now()}`)
 		viewerUIStore.actions.selectPVC({
@@ -170,12 +210,52 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 		setLaunchKey(`${selectedPVC.uid}:${Date.now()}`)
 	}
 
+	const handleFlowChange = useCallback((flow: ViewerFlowSnapshot) => {
+		recoverRef.current = flow.recover
+		setViewerSession(flow.session)
+		if (flow.manualCloseKind) {
+			lastFileSessionRef.current = null
+		}
+		setViewerFlow(current => (
+			current.error === flow.error
+			&& current.isReconnecting === flow.isReconnecting
+			&& current.manualCloseKind === flow.manualCloseKind
+			&& current.status === flow.status
+				? current
+				: {
+						error: flow.error,
+						isReconnecting: flow.isReconnecting,
+						manualCloseKind: flow.manualCloseKind,
+						status: flow.status,
+					}
+		))
+	}, [])
+
+	const handleReconnect = useCallback((error?: unknown) => {
+		void recoverRef.current?.(error)
+	}, [])
+
+	useEffect(() => {
+		if (fileSession) {
+			lastFileSessionRef.current = fileSession
+		}
+	}, [fileSession])
+
+	useEffect(() => {
+		if (!showSessionNavigation && view === 'files') {
+			viewerUIStore.actions.setView('volumes')
+		}
+		if (!showFileNavigation && view === 'trash') {
+			viewerUIStore.actions.setView(showSessionNavigation ? 'files' : 'volumes')
+		}
+	}, [showFileNavigation, showSessionNavigation, view])
+
 	return (
 		<main className="min-h-screen bg-muted/30 text-foreground">
 			<div className="flex min-h-screen">
 				<aside className="hidden w-64 shrink-0 border-r bg-sidebar px-4 py-5 text-sidebar-foreground lg:flex lg:flex-col">
 					<div className="flex items-center gap-3 px-2">
-						<div className="flex size-10 items-center justify-center rounded-lg border bg-background text-foreground">
+						<div className="flex size-10 items-center justify-center rounded-lg border bg-background text-foreground shrink-0">
 							<Database />
 						</div>
 						<div className="min-w-0">
@@ -185,8 +265,8 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 					</div>
 					<nav className="mt-8 flex flex-col gap-2">
 						<SidebarButton icon={<HardDrive />} label={t('nav.volumes')} value="volumes" view={view} />
-						<SidebarButton icon={<FolderOpen />} label={t('nav.files')} value="files" view={view} />
-						<SidebarButton icon={<Trash2 />} label={t('nav.trash')} value="trash" view={view} />
+						{showSessionNavigation ? <SidebarButton icon={<FolderOpen />} label={t('nav.files')} value="files" view={view} /> : null}
+						{showFileNavigation ? <SidebarButton icon={<Trash2 />} label={t('nav.trash')} value="trash" view={view} /> : null}
 					</nav>
 				</aside>
 
@@ -208,8 +288,8 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 						>
 							<TabsList>
 								<TabsTrigger value="volumes">{t('nav.volumes')}</TabsTrigger>
-								<TabsTrigger value="files">{t('nav.files')}</TabsTrigger>
-								<TabsTrigger value="trash">{t('nav.trash')}</TabsTrigger>
+								{showSessionNavigation ? <TabsTrigger value="files">{t('nav.files')}</TabsTrigger> : null}
+								{showFileNavigation ? <TabsTrigger value="trash">{t('nav.trash')}</TabsTrigger> : null}
 							</TabsList>
 						</Tabs>
 						<div className="flex flex-col gap-2 md:ml-auto md:flex-row md:items-center">
@@ -270,7 +350,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 								<ViewerLaunchPanel
 									api={api}
 									autoStartKey={launchKey}
-									onSessionStatusChange={setSessionStatus}
+									onFlowChange={handleFlowChange}
 									pvc={selectedPVC}
 									setToken={setToken}
 								/>
@@ -282,10 +362,11 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 											setCurrentPath(path)
 										}
 									}}
+									onReconnect={handleReconnect}
 									onRefreshSession={refreshActiveSession}
 									pvcName={selectedPVC?.name}
-									session={fileSession}
-									sessionStatus={sessionStatus}
+									session={displayFileSession}
+									sessionCapability={sessionCapability}
 									setSort={setSort}
 									sort={sort}
 								/>
@@ -318,6 +399,9 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 					if (deleteState?.pvc.uid === selectedPVC?.uid) {
 						setSelectedPVC(null)
 						setToken(null)
+						setViewerSession(null)
+						lastFileSessionRef.current = null
+						setViewerFlow(idleViewerFlowState)
 					}
 				}}
 			/>
@@ -486,7 +570,7 @@ function PVCRow({ onDelete, onExpand, onOpenFiles, pvc }: PVCRowProps) {
 				</div>
 			</TableCell>
 			<TableCell>
-				<div className="flex flex-col gap-1">
+				<div className="flex items-center gap-1">
 					<PVCStatusBadge pvc={pvc} />
 					<span className="text-xs text-muted-foreground">
 						{pvc.mounted ? t('status.mounted') : t('status.ready')}
@@ -515,7 +599,7 @@ function PVCRow({ onDelete, onExpand, onOpenFiles, pvc }: PVCRowProps) {
 				</div>
 			</TableCell>
 			<TableCell>
-				<div className="flex justify-end gap-2">
+				<div className="flex justify-end items-center gap-2">
 					<Button
 						disabled={!canLaunchViewer(pvc)}
 						onClick={() => onOpenFiles(pvc)}

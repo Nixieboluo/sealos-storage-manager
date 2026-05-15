@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+	buildFileTableRows,
 	fileNameFromPath,
 	flattenResources,
 	nextSortState,
@@ -26,6 +27,68 @@ describe('file tree helpers', () => {
 		})
 
 		expect(entries.map(entry => entry.path)).toEqual(['/docs', '/readme.md'])
+	})
+
+	it('builds async tree rows without applying a client-side page limit', () => {
+		const childItems = Array.from({ length: 30 }, (_, index) => ({
+			path: `/docs/file-${index}.txt`,
+			name: `file-${index}.txt`,
+			size: index,
+			modified: '2026-05-14T10:00:00Z',
+			isDir: false,
+		}))
+		const rootEntries = flattenResources({
+			path: '/',
+			name: '',
+			size: 0,
+			modified: '',
+			isDir: true,
+			items: [
+				{ path: '/docs', name: 'docs', size: 0, modified: '', isDir: true },
+			],
+		})
+		const childEntries = flattenResources({
+			path: '/docs',
+			name: 'docs',
+			size: 0,
+			modified: '',
+			isDir: true,
+			items: childItems,
+		}, 1)
+
+		const rows = buildFileTableRows(rootEntries, new Set(['/docs']), {
+			'/docs': { entries: childEntries },
+		})
+
+		expect(rows).toHaveLength(31)
+		expect(rows.filter(row => row.kind === 'resource')).toHaveLength(31)
+		expect(rows.some(row => row.kind !== 'resource')).toBe(false)
+	})
+
+	it('inserts branch loading and error rows for expanded folders', () => {
+		const rootEntries = flattenResources({
+			path: '/',
+			name: '',
+			size: 0,
+			modified: '',
+			isDir: true,
+			items: [
+				{ path: '/loading', name: 'loading', size: 0, modified: '', isDir: true },
+				{ path: '/failed', name: 'failed', size: 0, modified: '', isDir: true },
+			],
+		})
+
+		const rows = buildFileTableRows(rootEntries, new Set(['/loading', '/failed']), {
+			'/loading': { isLoading: true },
+			'/failed': { error: new Error('failed') },
+		})
+
+		expect(rows.map(row => row.kind)).toEqual([
+			'resource',
+			'branch-loading',
+			'resource',
+			'branch-error',
+		])
 	})
 
 	it('sorts folders first and toggles sort direction', () => {

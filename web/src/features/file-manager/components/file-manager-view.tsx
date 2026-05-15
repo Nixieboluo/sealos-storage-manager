@@ -1,8 +1,11 @@
-import type { FileBrowserSession, FileEntry } from '@/features/file-manager/types/file-manager'
-
+import type { ColumnDef, SortingState } from '@tanstack/react-table'
+import type { FileBrowserSession, FileEntry, FileTableRow } from '@/features/file-manager/types/file-manager'
 import type { FileSortState } from '@/features/file-manager/utils/file-tree'
+import type { SessionCapability } from '@/features/viewer/utils/session-capability'
+
 import { joinPath, parentPath } from '@sealos-storage-manager/filebrowser-client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 import {
 	ArrowLeft,
 	ChevronDown,
@@ -16,10 +19,10 @@ import {
 	Trash2,
 	Upload,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-
 import { toast } from 'sonner'
+
 import { Button } from '@/components/ui/button'
 import {
 	Dialog,
@@ -48,9 +51,11 @@ import { fileListQueryOptions, fileTextQueryOptions } from '@/features/file-mana
 import { moveToRecycleBin } from '@/features/file-manager/api/recycle-bin-api'
 import { uploadActions, useUploadTasks } from '@/features/file-manager/stores/upload-store'
 import {
-
+	buildFileTableRows,
+	flattenResources,
 	isEditableFile,
 	nextSortState,
+	sortEntries,
 } from '@/features/file-manager/utils/file-tree'
 import { formatBytes } from '@/features/viewer/utils/format-capacity'
 
@@ -58,34 +63,75 @@ interface FileManagerViewProps {
 	currentPath: string
 	onBackToVolumes: () => void
 	onPathChange: (path: string) => void
+	onReconnect: (error?: unknown) => void
 	onRefreshSession: () => void
 	pvcName?: string
 	session: FileBrowserSession | null
-	sessionStatus: string
+	sessionCapability: SessionCapability
 	sort: FileSortState
 	setSort: (sort: FileSortState) => void
+}
+
+interface BranchState {
+	entries?: FileEntry[]
+	error?: Error
+	isLoading?: boolean
+}
+
+interface BranchTreeState {
+	branches: Record<string, BranchState | undefined>
+	expandedPaths: Set<string>
+	scope: string
+}
+
+const emptyEntries: FileEntry[] = []
+const emptyBranches: Record<string, BranchState | undefined> = {}
+const emptyExpandedPaths = new Set<string>()
+
+function createBranchTreeState(scope: string): BranchTreeState {
+	return {
+		branches: {},
+		expandedPaths: new Set(),
+		scope,
+	}
 }
 
 export function FileManagerView({
 	currentPath,
 	onBackToVolumes,
 	onPathChange,
+	onReconnect,
 	onRefreshSession,
 	pvcName,
 	session,
-	sessionStatus,
+	sessionCapability,
 	sort,
 	setSort,
 }: FileManagerViewProps) {
 	const { t } = useTranslation()
 	const queryClient = useQueryClient()
-	const fileQuery = useQuery(fileListQueryOptions(session, currentPath, sort))
-	const entries = fileQuery.data?.entries ?? []
-	const canUseFiles = session !== null
+	const canShowFileList = sessionCapability.canShowFileList && session !== null
+	const canUseFiles = sessionCapability.canUseFiles && session !== null
+	const fileQuery = useQuery(fileListQueryOptions(session, currentPath, sort, canUseFiles))
+	const entries = fileQuery.data?.entries ?? emptyEntries
 	const tasks = useUploadTasks()
+	const treeScope = `${session?.pvcKey ?? 'inactive'}:${currentPath}`
+	const [treeState, setTreeState] = useState<BranchTreeState>(() => createBranchTreeState(treeScope))
+	const expandedPaths = treeState.scope === treeScope ? treeState.expandedPaths : emptyExpandedPaths
+	const branches = treeState.scope === treeScope ? treeState.branches : emptyBranches
 
-	function invalidateFiles() {
-		if (!session) {
+	const operationsDisabled = !canUseFiles || fileQuery.isFetching || hasPendingBranches(branches)
+	const showOverlay = canShowFileList && (fileQuery.isFetching || sessionCapability.kind === 'viewer-reconnecting')
+	const visiblePath = fileQuery.data?.path ?? currentPath
+
+	useEffect(() => {
+		if (fileQuery.error) {
+			onReconnect(fileQuery.error)
+		}
+	}, [fileQuery.error, onReconnect])
+
+	const invalidateFiles = useCallback(() => {
+		if (!session || !canUseFiles) {
 			return
 		}
 		void queryClient.invalidateQueries({
@@ -94,7 +140,176 @@ export function FileManagerView({
 		void queryClient.invalidateQueries({
 			queryKey: fileManagerKeys.recycleBin(session.pvcKey),
 		})
-	}
+	}, [canUseFiles, currentPath, queryClient, session])
+
+	const loadBranch = useCallback(async (entry: FileEntry) => {
+		if (!session || !canUseFiles) {
+			return
+		}
+		setTreeState((current) => {
+			const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
+			return {
+				...scoped,
+				branches: {
+					...scoped.branches,
+					[entry.path]: { isLoading: true },
+				},
+			}
+		})
+		try {
+			const resource = await queryClient.fetchQuery(fileListQueryOptions(session, entry.path, sort, canUseFiles))
+			setTreeState((current) => {
+				const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
+				return {
+					...scoped,
+					branches: {
+						...scoped.branches,
+						[entry.path]: {
+							entries: sortEntries(
+								flattenResources(resource.current, entry.depth + 1),
+								sort,
+							),
+						},
+					},
+				}
+			})
+		}
+		catch (caught) {
+			const error = caught instanceof Error ? caught : new Error(t('errors.generic'))
+			setTreeState((current) => {
+				const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
+				return {
+					...scoped,
+					branches: {
+						...scoped.branches,
+						[entry.path]: { error },
+					},
+				}
+			})
+			onReconnect(caught)
+		}
+	}, [canUseFiles, onReconnect, queryClient, session, sort, t, treeScope])
+
+	const toggleFolder = useCallback(async (entry: FileEntry) => {
+		if (!session || operationsDisabled) {
+			return
+		}
+
+		const hasEntries = Boolean(branches[entry.path]?.entries)
+		const shouldLoad = !expandedPaths.has(entry.path) && !hasEntries
+		setTreeState((current) => {
+			const scoped = current.scope === treeScope ? current : createBranchTreeState(treeScope)
+			const next = new Set(scoped.expandedPaths)
+			if (next.has(entry.path)) {
+				next.delete(entry.path)
+			}
+			else {
+				next.add(entry.path)
+			}
+			return {
+				...scoped,
+				expandedPaths: next,
+			}
+		})
+
+		if (!shouldLoad) {
+			return
+		}
+
+		await loadBranch(entry)
+	}, [branches, expandedPaths, loadBranch, operationsDisabled, session, treeScope])
+
+	const rows = useMemo(
+		() => buildFileTableRows(entries, expandedPaths, branches),
+		[branches, entries, expandedPaths],
+	)
+
+	const columns = useMemo<ColumnDef<FileTableRow>[]>(() => [
+		{
+			accessorFn: row => row.kind === 'resource' ? row.entry.name : row.path,
+			cell: info => (
+				<FileNameCell
+					disabled={operationsDisabled}
+					isExpanded={info.row.original.kind === 'resource' && expandedPaths.has(info.row.original.entry.path)}
+					onRetryBranch={(path) => {
+						const entry = rows.find(row => row.kind === 'resource' && row.entry.path === path)
+						if (entry?.kind === 'resource') {
+							void loadBranch(entry.entry)
+						}
+					}}
+					onToggleFolder={entry => void toggleFolder(entry)}
+					row={info.row.original}
+				/>
+			),
+			header: () => (
+				<SortableHead
+					active={sort.field === 'name'}
+					disabled={operationsDisabled}
+					direction={sort.direction}
+					label={t('files.columns.name')}
+					onClick={() => setSort(nextSortState(sort, 'name'))}
+				/>
+			),
+			id: 'name',
+		},
+		{
+			accessorFn: row => row.kind === 'resource' ? row.entry.size : 0,
+			cell: info => info.row.original.kind === 'resource'
+				? info.row.original.entry.isDir ? '-' : formatBytes(info.row.original.entry.size)
+				: '',
+			header: () => (
+				<SortableHead
+					active={sort.field === 'size'}
+					disabled={operationsDisabled}
+					direction={sort.direction}
+					label={t('files.columns.size')}
+					onClick={() => setSort(nextSortState(sort, 'size'))}
+				/>
+			),
+			id: 'size',
+		},
+		{
+			accessorFn: row => row.kind === 'resource' ? row.entry.modified : '',
+			cell: info => info.row.original.kind === 'resource' ? info.row.original.entry.modified || '-' : '',
+			header: () => (
+				<SortableHead
+					active={sort.field === 'modified'}
+					disabled={operationsDisabled}
+					direction={sort.direction}
+					label={t('files.columns.modified')}
+					onClick={() => setSort(nextSortState(sort, 'modified'))}
+				/>
+			),
+			id: 'modified',
+		},
+		{
+			cell: info => info.row.original.kind === 'resource' && session
+				? (
+						<FileActions
+							disabled={operationsDisabled}
+							entry={info.row.original.entry}
+							onDeleted={invalidateFiles}
+							onOpenFolder={onPathChange}
+							session={session}
+						/>
+					)
+				: null,
+			header: () => <span>{t('files.columns.actions')}</span>,
+			id: 'actions',
+		},
+	], [expandedPaths, invalidateFiles, loadBranch, operationsDisabled, onPathChange, rows, session, setSort, sort, t, toggleFolder])
+
+	const table = useReactTable({
+		columns,
+		data: rows,
+		getCoreRowModel: getCoreRowModel(),
+		getRowId: row => row.id,
+		getSortedRowModel: getSortedRowModel(),
+		manualSorting: true,
+		state: {
+			sorting: [{ desc: sort.direction === 'desc', id: sort.field }] satisfies SortingState,
+		},
+	})
 
 	return (
 		<section className="flex min-h-0 flex-1 flex-col gap-4">
@@ -110,119 +325,144 @@ export function FileManagerView({
 						<ArrowLeft data-icon="inline-start" />
 						{t('files.backToVolumes')}
 					</Button>
-					<CreateFolderDialog
-						currentPath={currentPath}
-						disabled={!canUseFiles}
-						onCreated={invalidateFiles}
-						session={session}
-					/>
-					<UploadDialog
-						currentPath={currentPath}
-						disabled={!canUseFiles}
-						onUploaded={invalidateFiles}
-						session={session}
-					/>
-					<Button
-						aria-label={t('actions.refresh')}
-						disabled={!canUseFiles}
-						onClick={() => {
-							onRefreshSession()
-							void fileQuery.refetch()
-						}}
-						size="icon"
-						variant="outline"
-					>
-						<RefreshCw />
-					</Button>
+					{canShowFileList
+						? (
+								<>
+									<CreateFolderDialog
+										currentPath={currentPath}
+										disabled={operationsDisabled}
+										onCreated={invalidateFiles}
+										session={session}
+									/>
+									<UploadDialog
+										currentPath={currentPath}
+										disabled={operationsDisabled}
+										onUploaded={invalidateFiles}
+										session={session}
+									/>
+									<Button
+										aria-label={t('actions.refresh')}
+										disabled={!canUseFiles || operationsDisabled}
+										onClick={() => {
+											onRefreshSession()
+											void fileQuery.refetch()
+										}}
+										size="icon"
+										variant="outline"
+									>
+										<RefreshCw />
+									</Button>
+								</>
+							)
+						: null}
 				</div>
 			</header>
 			<Separator />
 
-			<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-				<Button
-					disabled={currentPath === '/' || !canUseFiles}
-					onClick={() => onPathChange(parentPath(currentPath))}
-					size="sm"
-					variant="ghost"
-				>
-					<ArrowLeft data-icon="inline-start" />
-					{t('files.up')}
-				</Button>
-				<span className="rounded-md border bg-muted px-2 py-1 font-mono text-xs text-foreground">
-					{currentPath}
-				</span>
-				{sessionStatus !== 'ready'
-					? <span>{t('files.preparingViewer')}</span>
-					: null}
-			</div>
+			{!canShowFileList
+				? (
+						<div className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">
+							{t(sessionCapability.messageKey)}
+						</div>
+					)
+				: (
+						<>
+							<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+								<Button
+									disabled={currentPath === '/' || operationsDisabled}
+									onClick={() => onPathChange(parentPath(currentPath))}
+									size="sm"
+									variant="ghost"
+								>
+									<ArrowLeft data-icon="inline-start" />
+									{t('files.up')}
+								</Button>
+								<span className="rounded-md border bg-muted px-2 py-1 font-mono text-xs text-foreground">
+									{visiblePath}
+								</span>
+								{currentPath !== visiblePath
+									? (
+											<span className="rounded-md border bg-muted px-2 py-1 text-xs">
+												{t('files.pendingPath', { path: currentPath })}
+											</span>
+										)
+									: null}
+								{!canUseFiles ? <span>{t(sessionCapability.messageKey)}</span> : null}
+							</div>
 
-			<div className="min-h-0 rounded-lg border bg-card">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<SortableHead
-								active={sort.field === 'name'}
-								direction={sort.direction}
-								label={t('files.columns.name')}
-								onClick={() => setSort(nextSortState(sort, 'name'))}
-							/>
-							<SortableHead
-								active={sort.field === 'size'}
-								direction={sort.direction}
-								label={t('files.columns.size')}
-								onClick={() => setSort(nextSortState(sort, 'size'))}
-							/>
-							<SortableHead
-								active={sort.field === 'modified'}
-								direction={sort.direction}
-								label={t('files.columns.modified')}
-								onClick={() => setSort(nextSortState(sort, 'modified'))}
-							/>
-							<TableHead className="text-right">{t('files.columns.actions')}</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{fileQuery.isLoading || !canUseFiles
-							? (
-									<TableRow>
-										<TableCell className="py-12 text-center text-muted-foreground" colSpan={4}>
-											{canUseFiles ? t('common.loading') : t('files.preparingViewer')}
-										</TableCell>
-									</TableRow>
-								)
-							: null}
-						{fileQuery.error
-							? (
-									<TableRow>
-										<TableCell className="py-12 text-center text-destructive" colSpan={4}>
-											{fileQuery.error instanceof Error ? fileQuery.error.message : t('errors.generic')}
-										</TableCell>
-									</TableRow>
-								)
-							: null}
-						{!fileQuery.isLoading && !fileQuery.error && canUseFiles
-							? entries.map(entry => (
-									<FileRow
-										entry={entry}
-										key={entry.path}
-										onDeleted={invalidateFiles}
-										onOpenFolder={onPathChange}
-										session={session}
-									/>
-								))
-							: null}
-						{!fileQuery.isLoading && !fileQuery.error && canUseFiles && entries.length === 0
-							? (
-									<TableRow>
-										<TableCell className="py-12 text-center text-muted-foreground" colSpan={4}>
-											{t('files.empty')}
-										</TableCell>
-									</TableRow>
-								)
-							: null}
-					</TableBody>
-				</Table>
-			</div>
+							<div className="relative min-h-0 rounded-lg border bg-card">
+								<Table>
+									<TableHeader>
+										{table.getHeaderGroups().map(headerGroup => (
+											<TableRow key={headerGroup.id}>
+												{headerGroup.headers.map(header => (
+													<TableHead className={header.id === 'actions' ? 'text-right' : undefined} key={header.id}>
+														{header.isPlaceholder
+															? null
+															: flexRender(header.column.columnDef.header, header.getContext())}
+													</TableHead>
+												))}
+											</TableRow>
+										))}
+									</TableHeader>
+									<TableBody>
+										{fileQuery.isLoading && rows.length === 0
+											? (
+													<TableRow>
+														<TableCell className="py-12 text-center text-muted-foreground" colSpan={4}>
+															{t('files.pending')}
+														</TableCell>
+													</TableRow>
+												)
+											: null}
+										{fileQuery.error && rows.length === 0
+											? (
+													<TableRow>
+														<TableCell className="py-12 text-center text-destructive" colSpan={4}>
+															<div className="flex flex-col items-center gap-3">
+																<span>{fileQuery.error instanceof Error ? fileQuery.error.message : t('errors.generic')}</span>
+																<Button onClick={() => void fileQuery.refetch()} size="sm" variant="outline">
+																	{t('actions.retry')}
+																</Button>
+															</div>
+														</TableCell>
+													</TableRow>
+												)
+											: null}
+										{table.getRowModel().rows.map(row => (
+											<TableRow key={row.id}>
+												{row.getVisibleCells().map(cell => (
+													<TableCell className={cell.column.id === 'actions' ? 'text-right' : undefined} key={cell.id}>
+														{flexRender(cell.column.columnDef.cell, cell.getContext())}
+													</TableCell>
+												))}
+											</TableRow>
+										))}
+										{!fileQuery.isLoading && !fileQuery.error && rows.length === 0
+											? (
+													<TableRow>
+														<TableCell className="py-12 text-center text-muted-foreground" colSpan={4}>
+															{t('files.empty')}
+														</TableCell>
+													</TableRow>
+												)
+											: null}
+									</TableBody>
+								</Table>
+								{showOverlay
+									? (
+											<div className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/70 backdrop-blur-[1px]" role="status">
+												<div className="rounded-md border bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
+													{sessionCapability.kind === 'viewer-reconnecting'
+														? t('files.reconnecting')
+														: t('files.pending')}
+												</div>
+											</div>
+										)
+									: null}
+							</div>
+						</>
+					)}
 
 			{tasks.length > 0
 				? (
@@ -257,31 +497,93 @@ export function FileManagerView({
 interface SortableHeadProps {
 	active: boolean
 	direction: 'asc' | 'desc'
+	disabled: boolean
 	label: string
 	onClick: () => void
 }
 
-function SortableHead({ active, direction, label, onClick }: SortableHeadProps) {
+function SortableHead({ active, direction, disabled, label, onClick }: SortableHeadProps) {
 	return (
-		<TableHead>
-			<Button onClick={onClick} size="sm" variant="ghost">
-				{label}
-				{active
-					? <ChevronDown data-icon="inline-end" data-state={direction} />
-					: null}
-			</Button>
-		</TableHead>
+		<Button disabled={disabled} onClick={onClick} size="sm" variant="ghost">
+			{label}
+			{active ? <ChevronDown data-icon="inline-end" data-state={direction} /> : null}
+		</Button>
 	)
 }
 
-interface FileRowProps {
+interface FileNameCellProps {
+	disabled: boolean
+	isExpanded: boolean
+	onRetryBranch: (path: string) => void
+	onToggleFolder: (entry: FileEntry) => void
+	row: FileTableRow
+}
+
+function FileNameCell({
+	disabled,
+	isExpanded,
+	onRetryBranch,
+	onToggleFolder,
+	row,
+}: FileNameCellProps) {
+	const { t } = useTranslation()
+
+	if (row.kind === 'branch-loading') {
+		return (
+			<div className="flex min-w-0 items-center gap-2 text-muted-foreground" style={{ paddingLeft: `${row.depth * 16}px` }}>
+				<span className="size-4" />
+				<span>{t('files.pending')}</span>
+			</div>
+		)
+	}
+
+	if (row.kind === 'branch-error') {
+		return (
+			<div className="flex min-w-0 items-center gap-2 text-destructive" style={{ paddingLeft: `${row.depth * 16}px` }}>
+				<span>{row.error.message}</span>
+				<Button disabled={disabled} onClick={() => onRetryBranch(row.path)} size="sm" variant="outline">
+					{t('files.retryFolder')}
+				</Button>
+			</div>
+		)
+	}
+
+	const entry = row.entry
+	return (
+		<div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${entry.depth * 16}px` }}>
+			{entry.isDir
+				? (
+						<Button
+							aria-label={t('files.toggleFolder')}
+							disabled={disabled}
+							onClick={() => onToggleFolder(entry)}
+							size="icon"
+							variant="ghost"
+						>
+							{isExpanded ? <ChevronDown /> : <ChevronRight />}
+						</Button>
+					)
+				: <span className="size-9" />}
+			<div className="flex size-8 items-center justify-center rounded-md border bg-muted text-muted-foreground">
+				{entry.isDir ? <Folder /> : <File />}
+			</div>
+			<div className="min-w-0">
+				<div className="truncate font-medium">{entry.name}</div>
+				<div className="truncate font-mono text-xs text-muted-foreground">{entry.path}</div>
+			</div>
+		</div>
+	)
+}
+
+interface FileActionsProps {
+	disabled: boolean
 	entry: FileEntry
 	onDeleted: () => void
 	onOpenFolder: (path: string) => void
 	session: FileBrowserSession
 }
 
-function FileRow({ entry, onDeleted, onOpenFolder, session }: FileRowProps) {
+function FileActions({ disabled, entry, onDeleted, onOpenFolder, session }: FileActionsProps) {
 	const { t } = useTranslation()
 	const [editing, setEditing] = useState(false)
 	const [deleting, setDeleting] = useState(false)
@@ -331,58 +633,35 @@ function FileRow({ entry, onDeleted, onOpenFolder, session }: FileRowProps) {
 
 	return (
 		<>
-			<TableRow
-				onDoubleClick={() => {
-					if (entry.isDir) {
-						onOpenFolder(entry.path)
-					}
-				}}
-			>
-				<TableCell>
-					<div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${entry.depth * 16}px` }}>
-						{entry.isDir ? <ChevronRight /> : <span className="size-4" />}
-						<div className="flex size-8 items-center justify-center rounded-md border bg-muted text-muted-foreground">
-							{entry.isDir ? <Folder /> : <File />}
-						</div>
-						<div className="min-w-0">
-							<div className="truncate font-medium">{entry.name}</div>
-							<div className="truncate font-mono text-xs text-muted-foreground">{entry.path}</div>
-						</div>
-					</div>
-				</TableCell>
-				<TableCell>{entry.isDir ? '-' : formatBytes(entry.size)}</TableCell>
-				<TableCell>{entry.modified || '-'}</TableCell>
-				<TableCell>
-					<div className="flex justify-end gap-1">
-						{entry.isDir
-							? (
-									<Button
-										aria-label={t('files.openFolder')}
-										onClick={() => onOpenFolder(entry.path)}
-										size="icon"
-										variant="ghost"
-									>
-										<ChevronRight />
-									</Button>
-								)
-							: (
-									<Button aria-label={t('files.download')} onClick={() => void download()} size="icon" variant="ghost">
-										<Download />
-									</Button>
-								)}
-						{!entry.isDir && isEditableFile(entry.path)
-							? (
-									<Button aria-label={t('files.edit')} onClick={openEditor} size="icon" variant="ghost">
-										<Edit3 />
-									</Button>
-								)
-							: null}
-						<Button aria-label={t('actions.delete')} onClick={() => setDeleting(true)} size="icon" variant="ghost">
-							<Trash2 />
-						</Button>
-					</div>
-				</TableCell>
-			</TableRow>
+			<div className="flex justify-end gap-1">
+				{entry.isDir
+					? (
+							<Button
+								aria-label={t('files.openFolder')}
+								disabled={disabled}
+								onClick={() => onOpenFolder(entry.path)}
+								size="icon"
+								variant="ghost"
+							>
+								<ChevronRight />
+							</Button>
+						)
+					: (
+							<Button aria-label={t('files.download')} disabled={disabled} onClick={() => void download()} size="icon" variant="ghost">
+								<Download />
+							</Button>
+						)}
+				{!entry.isDir && isEditableFile(entry.path)
+					? (
+							<Button aria-label={t('files.edit')} disabled={disabled} onClick={openEditor} size="icon" variant="ghost">
+								<Edit3 />
+							</Button>
+						)
+					: null}
+				<Button aria-label={t('actions.delete')} disabled={disabled} onClick={() => setDeleting(true)} size="icon" variant="ghost">
+					<Trash2 />
+				</Button>
+			</div>
 
 			<Dialog onOpenChange={setEditing} open={editing}>
 				<DialogContent className="sm:max-w-3xl">
@@ -591,4 +870,8 @@ function UploadDialog({ currentPath, disabled, onUploaded, session }: DialogWith
 			</Dialog>
 		</>
 	)
+}
+
+function hasPendingBranches(branches: Record<string, BranchState | undefined>) {
+	return Object.values(branches).some(branch => branch?.isLoading)
 }

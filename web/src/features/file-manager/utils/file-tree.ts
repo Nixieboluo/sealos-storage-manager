@@ -1,5 +1,5 @@
 import type { FileBrowserResource } from '@sealos-storage-manager/filebrowser-client'
-import type { FileEntry } from '@/features/file-manager/types/file-manager'
+import type { FileEntry, FileTableRow } from '@/features/file-manager/types/file-manager'
 
 import { normalizePath } from '@sealos-storage-manager/filebrowser-client'
 
@@ -53,6 +53,67 @@ export function sortEntries(entries: FileEntry[], sort: FileSortState): FileEntr
 				return 0
 		}
 	})
+}
+
+export interface ExpandedFolderBranch {
+	entries?: FileEntry[]
+	error?: Error
+	isLoading?: boolean
+}
+
+export type ExpandedFolderMap = Record<string, ExpandedFolderBranch | undefined>
+
+export function buildFileTableRows(
+	entries: FileEntry[],
+	expandedPaths: Set<string>,
+	branches: ExpandedFolderMap,
+): FileTableRow[] {
+	const rows: FileTableRow[] = []
+	appendRows(rows, entries, expandedPaths, branches)
+	return rows
+}
+
+function appendRows(
+	rows: FileTableRow[],
+	entries: FileEntry[],
+	expandedPaths: Set<string>,
+	branches: ExpandedFolderMap,
+) {
+	for (const entry of entries) {
+		rows.push({
+			entry,
+			id: `resource:${entry.path}`,
+			kind: 'resource',
+		})
+
+		if (!entry.isDir || !expandedPaths.has(entry.path)) {
+			continue
+		}
+
+		const branch = branches[entry.path]
+		if (branch?.isLoading) {
+			rows.push({
+				depth: entry.depth + 1,
+				id: `branch-loading:${entry.path}`,
+				kind: 'branch-loading',
+				path: entry.path,
+			})
+			continue
+		}
+
+		if (branch?.error) {
+			rows.push({
+				depth: entry.depth + 1,
+				error: branch.error,
+				id: `branch-error:${entry.path}`,
+				kind: 'branch-error',
+				path: entry.path,
+			})
+			continue
+		}
+
+		appendRows(rows, branch?.entries ?? [], expandedPaths, branches)
+	}
 }
 
 export function nextSortState(current: FileSortState, field: FileSortField): FileSortState {

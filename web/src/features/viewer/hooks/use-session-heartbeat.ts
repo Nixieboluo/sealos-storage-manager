@@ -8,6 +8,7 @@ interface UseSessionHeartbeatInput {
 	api?: ViewerAPI
 	enabled: boolean
 	intervalMs?: number
+	onError?: (error: unknown) => void
 	viewerSessionID: string | null
 }
 
@@ -15,6 +16,7 @@ export function useSessionHeartbeat({
 	api = viewerApi,
 	enabled,
 	intervalMs = 20_000,
+	onError,
 	viewerSessionID,
 }: UseSessionHeartbeatInput) {
 	useEffect(() => {
@@ -24,8 +26,10 @@ export function useSessionHeartbeat({
 
 		let cancelled = false
 		const sendHeartbeat = () => {
-			void api.heartbeatViewerSession(viewerSessionID).catch(() => {
-				void cancelled
+			void api.heartbeatViewerSession(viewerSessionID).catch((error: unknown) => {
+				if (!cancelled) {
+					onError?.(error)
+				}
 			})
 		}
 
@@ -35,5 +39,5 @@ export function useSessionHeartbeat({
 			cancelled = true
 			window.clearInterval(id)
 		}
-	}, [api, enabled, intervalMs, viewerSessionID])
+	}, [api, enabled, intervalMs, onError, viewerSessionID])
 }

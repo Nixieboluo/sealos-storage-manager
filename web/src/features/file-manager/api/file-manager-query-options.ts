@@ -2,7 +2,7 @@ import type { FileBrowserSession, FileListResult, RecycleEntry } from '@/feature
 
 import type { FileSortState } from '@/features/file-manager/utils/file-tree'
 
-import { queryOptions } from '@tanstack/react-query'
+import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { fileManagerKeys } from '@/features/file-manager/api/file-manager-query-keys'
 import { readRecycleIndex } from '@/features/file-manager/api/recycle-bin-api'
 import { flattenResources, sortEntries } from '@/features/file-manager/utils/file-tree'
@@ -11,9 +11,11 @@ export function fileListQueryOptions(
 	session: FileBrowserSession | null,
 	path: string,
 	sort: FileSortState,
+	enabled = true,
 ) {
+	const sortKey = `${sort.field}:${sort.direction}`
 	return queryOptions({
-		queryKey: fileManagerKeys.files(session?.pvcKey ?? 'inactive', path),
+		queryKey: fileManagerKeys.files(session?.pvcKey ?? 'inactive', path, sortKey),
 		queryFn: async ({ signal }): Promise<FileListResult> => {
 			if (!session) {
 				throw new Error('File Browser session is not ready')
@@ -25,7 +27,8 @@ export function fileListQueryOptions(
 				path,
 			}
 		},
-		enabled: session !== null,
+		enabled: session !== null && enabled,
+		placeholderData: keepPreviousData,
 		staleTime: 5_000,
 	})
 }

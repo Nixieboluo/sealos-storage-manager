@@ -80,4 +80,30 @@ describe('useViewerSessionFlow', () => {
 		await vi.waitFor(() => expect(result.current.session?.id).toBe('vs_new'))
 		expect(createViewerSession).toHaveBeenCalledTimes(2)
 	})
+
+	it('does not recover after a manual close is registered', async () => {
+		const createViewerSession = vi.fn().mockResolvedValue(viewerSessionFixture({ id: 'vs_1', status: 'creating' }))
+		const api = createFakeViewerAPI({ createViewerSession })
+
+		const { result } = renderHook(() =>
+			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
+		)
+
+		await act(async () => {
+			await result.current.start({
+				namespace: 'default',
+				pvcName: 'data',
+				uid: 'uid',
+			})
+		})
+		act(() => result.current.registerManualClose('viewer'))
+		await act(async () => {
+			await result.current.recover(new Error('lost'))
+		})
+
+		expect(result.current.isManualClosed).toBe(true)
+		expect(result.current.manualCloseKind).toBe('viewer')
+		expect(result.current.token).toBeNull()
+		expect(createViewerSession).toHaveBeenCalledTimes(1)
+	})
 })

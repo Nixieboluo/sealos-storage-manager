@@ -12,6 +12,26 @@ export interface FileEntry {
 	type: FileEntryType
 }
 
+export type FileTableRow
+	= | {
+		entry: FileEntry
+		id: string
+		kind: 'resource'
+	}
+	| {
+		depth: number
+		id: string
+		kind: 'branch-loading'
+		path: string
+	}
+	| {
+		depth: number
+		error: Error
+		id: string
+		kind: 'branch-error'
+		path: string
+	}
+
 export interface RecycleEntry {
 	deletedAt: string
 	id: string

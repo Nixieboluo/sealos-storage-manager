@@ -1,3 +1,4 @@
+import type { ViewerSessionFlow } from '@/features/viewer/hooks/use-viewer-session-flow'
 import type { PVC, ViewerAPI, ViewerToken } from '@/features/viewer/types/viewer'
 
 import { useEffect } from 'react'
@@ -16,9 +17,19 @@ import { useViewerSessionFlow } from '@/features/viewer/hooks/use-viewer-session
 import { viewerUIStore } from '@/features/viewer/stores/viewer-ui-store'
 import { pvcIdentity } from '@/features/viewer/utils/viewer-status'
 
+export interface ViewerFlowSnapshot {
+	error: ViewerSessionFlow['error']
+	isReconnecting: ViewerSessionFlow['isReconnecting']
+	manualCloseKind: ViewerSessionFlow['manualCloseKind']
+	recover: ViewerSessionFlow['recover']
+	session: ViewerSessionFlow['session']
+	status: ViewerSessionFlow['status']
+}
+
 interface ViewerLaunchPanelProps {
 	api?: ViewerAPI
 	autoStartKey?: string | null
+	onFlowChange?: (flow: ViewerFlowSnapshot) => void
 	onSessionStatusChange?: (status: string) => void
 	pvc: PVC | null
 	setToken: (token: ViewerToken | null) => void
@@ -27,6 +38,7 @@ interface ViewerLaunchPanelProps {
 export function ViewerLaunchPanel({
 	api = viewerApi,
 	autoStartKey,
+	onFlowChange,
 	onSessionStatusChange,
 	pvc,
 	setToken,
@@ -35,10 +47,12 @@ export function ViewerLaunchPanel({
 	const flow = useViewerSessionFlow({ api })
 	const active = flow.status === 'ready'
 	const startFlow = flow.start
+	const recoverFlow = flow.recover
 
 	useSessionHeartbeat({
 		api,
 		enabled: active,
+		onError: error => void recoverFlow(error),
 		viewerSessionID: flow.session?.id ?? null,
 	})
 	useBeforeUnloadCloseSession({
@@ -60,6 +74,25 @@ export function ViewerLaunchPanel({
 	useEffect(() => {
 		onSessionStatusChange?.(flow.status)
 	}, [flow.status, onSessionStatusChange])
+
+	useEffect(() => {
+		onFlowChange?.({
+			error: flow.error,
+			isReconnecting: flow.isReconnecting,
+			manualCloseKind: flow.manualCloseKind,
+			recover: flow.recover,
+			session: flow.session,
+			status: flow.status,
+		})
+	}, [
+		flow.error,
+		flow.isReconnecting,
+		flow.manualCloseKind,
+		flow.recover,
+		flow.session,
+		flow.status,
+		onFlowChange,
+	])
 
 	useEffect(() => {
 		if (!pvc || !autoStartKey) {
@@ -101,6 +134,7 @@ export function ViewerLaunchPanel({
 					</Button>
 					<SessionActions
 						api={api}
+						onManualClose={flow.registerManualClose}
 						podSessionID={flow.session?.pod_session_id ?? null}
 						viewerSessionID={flow.session?.id ?? null}
 					/>
