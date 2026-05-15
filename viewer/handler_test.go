@@ -198,6 +198,113 @@ func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
 	}
 }
 
+func TestHandlerGetContextUsesKubeconfigNamespace(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/context", nil)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.GetContext(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"namespace":"ns"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerRejectsExplicitDifferentNamespace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		request func() *http.Request
+		handle  func(*Handler, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "list pvcs",
+			request: func() *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/api/pvcs?namespace=other", nil)
+			},
+			handle: (*Handler).ListPVCs,
+		},
+		{
+			name: "create pvc",
+			request: func() *http.Request {
+				return httptest.NewRequest(
+					http.MethodPost,
+					"/api/pvcs",
+					strings.NewReader(`{"namespace":"other","name":"data","capacity":"10Gi","access_modes":["ReadWriteOnce"]}`),
+				)
+			},
+			handle: (*Handler).CreatePVC,
+		},
+		{
+			name: "expand pvc",
+			request: func() *http.Request {
+				return httptest.NewRequest(
+					http.MethodPost,
+					"/api/pvcs/other/data/expand",
+					strings.NewReader(`{"capacity":"20Gi"}`),
+				)
+			},
+			handle: (*Handler).ExpandPVC,
+		},
+		{
+			name: "delete pvc",
+			request: func() *http.Request {
+				return httptest.NewRequest(http.MethodDelete, "/api/pvcs/other/data", nil)
+			},
+			handle: (*Handler).DeletePVC,
+		},
+		{
+			name: "create viewer session",
+			request: func() *http.Request {
+				return httptest.NewRequest(
+					http.MethodPost,
+					"/api/viewer-sessions",
+					strings.NewReader(`{"namespace":"other","pvc_name":"data"}`),
+				)
+			},
+			handle: (*Handler).CreateViewerSession,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := NewHandler(
+				&fakeViewerService{},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+			)
+			req := tt.request()
+			req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+			recorder := httptest.NewRecorder()
+
+			tt.handle(handler, recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandlerCreatePVCUsesEnvelope(t *testing.T) {
 	t.Parallel()
 

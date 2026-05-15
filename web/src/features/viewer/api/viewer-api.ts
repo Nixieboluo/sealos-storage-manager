@@ -9,6 +9,7 @@ import type {
 	PVC,
 	StorageClass,
 	ViewerAPI,
+	ViewerContext,
 	ViewerSession,
 	ViewerToken,
 } from '@/features/viewer/types/viewer'
@@ -130,6 +131,18 @@ export function createViewerApi(client = new Client(apiTarget())): ViewerAPI {
 					capacity_bytes: input.capacityBytes,
 				})
 				return response.pvc
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async getContext(): Promise<ViewerContext> {
+			try {
+				const response = await client.viewer.GetContext({
+					Authorization: authorization(),
+				})
+				return response.context
 			}
 			catch (error) {
 				throw normalizeViewerError(error)

@@ -39,6 +39,12 @@ resolved in this order:
 2. `VITE_DEV_KUBECONFIG`
 3. `localStorage["sealos-storage-manager.kubeconfig"]`
 
+The active namespace is backend-owned. The frontend reads it from `/api/context`,
+which derives the namespace from the kubeconfig current context, and the UI only
+shows that namespace as read-only context. PVC and viewer operations are sent for
+that backend-synchronized namespace; direct API calls with a different namespace
+are rejected by the backend.
+
 Large File Browser uploads use TUS by default at 32 MiB with 8 MiB chunks and 5
 retry delays. Override with `VITE_FILE_UPLOAD_TUS_THRESHOLD_BYTES`,
 `VITE_FILE_UPLOAD_TUS_CHUNK_BYTES`, and `VITE_FILE_UPLOAD_TUS_RETRY_COUNT`.
@@ -115,7 +121,6 @@ provided:
 
 ```bash
 export VITE_DEV_KUBECONFIG="$(cat kubeconfig.test.yaml)"
-export E2E_NAMESPACE="<dedicated-test-namespace>"
 export E2E_STORAGE_CLASS="<optional-storage-class>"
 export E2E_RUN_DESTRUCTIVE=1
 pnpm e2e

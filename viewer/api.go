@@ -16,6 +16,11 @@ func ListPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, err
 	return runtimeHandler().ListPVCsData(ctx, req)
 }
 
+//encore:api public method=GET path=/api/context
+func GetContext(ctx context.Context, req *AuthenticatedRequest) (*ContextResponse, error) {
+	return runtimeHandler().GetContextData(ctx, req)
+}
+
 //encore:api public method=POST path=/api/pvcs
 func CreatePVC(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, error) {
 	return runtimeHandler().CreatePVCData(ctx, req)

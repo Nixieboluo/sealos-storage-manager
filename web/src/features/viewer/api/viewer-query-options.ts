@@ -15,7 +15,16 @@ export function pvcListQueryOptions(namespace: string, api: ViewerAPI = viewerAp
 	return queryOptions({
 		queryKey: viewerKeys.pvcs(namespace),
 		queryFn: () => api.listPVCs({ namespace }),
+		enabled: namespace.length > 0,
 		staleTime: 15_000,
+	})
+}
+
+export function viewerContextQueryOptions(api: ViewerAPI = viewerApi) {
+	return queryOptions({
+		queryKey: viewerKeys.context(),
+		queryFn: () => api.getContext(),
+		staleTime: 60_000,
 	})
 }
 

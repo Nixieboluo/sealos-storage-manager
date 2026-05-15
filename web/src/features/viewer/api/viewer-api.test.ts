@@ -3,7 +3,7 @@ import { APIError, ErrCode } from '@sealos-storage-manager/encore-client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createViewerApi, readAuthorizationHeader } from '@/features/viewer/api/viewer-api'
 import { ViewerApiError } from '@/features/viewer/api/viewer-error'
-import { pvcFixture, storageClassFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
+import { pvcFixture, storageClassFixture, viewerContextFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
 
 describe('viewer API adapter', () => {
 	afterEach(() => {
@@ -54,6 +54,9 @@ describe('viewer API adapter', () => {
 		const deletePVC = vi.fn().mockResolvedValue({
 			pvc: pvcFixture({ name: 'mysql-data' }),
 		})
+		const getContext = vi.fn().mockResolvedValue({
+			context: viewerContextFixture(),
+		})
 		const createViewerSession = vi.fn().mockResolvedValue({
 			viewer_session: viewerSessionFixture({ id: 'vs_1' }),
 		})
@@ -65,9 +68,13 @@ describe('viewer API adapter', () => {
 				CreateViewerSession: createViewerSession,
 				ExpandPVC: expandPVC,
 				DeletePVC: deletePVC,
+				GetContext: getContext,
 			},
 		} as never)
 
+		await expect(api.getContext()).resolves.toEqual(expect.objectContaining({
+			namespace: 'ns-admin',
+		}))
 		await expect(api.listPVCs({ namespace: 'default' })).resolves.toEqual([
 			expect.objectContaining({ name: 'mysql-data' }),
 		])
@@ -123,6 +130,9 @@ describe('viewer API adapter', () => {
 			capacity_bytes: 20 * 1024 * 1024 * 1024,
 		})
 		expect(deletePVC).toHaveBeenCalledWith('default', 'mysql-data', {
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(getContext).toHaveBeenCalledWith({
 			Authorization: 'Bearer test-kubeconfig',
 		})
 	})

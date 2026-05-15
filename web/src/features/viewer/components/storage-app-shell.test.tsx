@@ -15,6 +15,10 @@ describe('storageAppShell', () => {
 
 	it('renders PVCs, filters them, launches File Browser, and shows real file manager state', async () => {
 		const user = userEvent.setup()
+		const listPVCs = vi.fn().mockResolvedValue([
+			pvcFixture({ name: 'mysql-data', namespace: 'ns-admin', uid: 'uid-1' }),
+			pvcFixture({ name: 'logs', namespace: 'ns-admin', uid: 'uid-2' }),
+		])
 		const api = createFakeViewerAPI({
 			createViewerSession: vi.fn().mockResolvedValue(viewerSessionFixture({
 				id: 'vs_1',
@@ -25,16 +29,16 @@ describe('storageAppShell', () => {
 				viewer_session_id: 'vs_1',
 				viewer_url: 'https://viewer.example.test',
 			})),
-			listPVCs: vi.fn().mockResolvedValue([
-				pvcFixture({ name: 'mysql-data', uid: 'uid-1' }),
-				pvcFixture({ name: 'logs', uid: 'uid-2' }),
-			]),
+			listPVCs,
 		})
 
 		renderWithProviders(<StorageAppShell api={api} />)
 
 		expect(await screen.findByText('mysql-data')).toBeInTheDocument()
 		expect(screen.getByText('logs')).toBeInTheDocument()
+		expect(screen.getAllByText('ns-admin').length).toBeGreaterThan(0)
+		expect(listPVCs).toHaveBeenCalledWith({ namespace: 'ns-admin' })
+		expect(listPVCs).not.toHaveBeenCalledWith({ namespace: 'default' })
 
 		await user.type(screen.getByLabelText('Search'), 'mysql')
 		await waitFor(() => expect(screen.queryByText('logs')).not.toBeInTheDocument())
@@ -49,6 +53,7 @@ describe('storageAppShell', () => {
 		const user = userEvent.setup()
 		const createPVC = vi.fn().mockResolvedValue(pvcFixture({
 			name: 'cache-data',
+			namespace: 'ns-admin',
 			uid: 'cache-uid',
 			capacity: '5Gi',
 			capacity_bytes: 5 * 1024 * 1024 * 1024,
@@ -69,6 +74,7 @@ describe('storageAppShell', () => {
 
 		await waitFor(() => expect(createPVC).toHaveBeenCalledWith(expect.objectContaining({
 			name: 'cache-data',
+			namespace: 'ns-admin',
 			capacity: '5Gi',
 			capacityBytes: 5 * 1024 * 1024 * 1024,
 		})))

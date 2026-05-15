@@ -1,4 +1,4 @@
-import type { domain } from '@sealos-storage-manager/encore-client'
+import type { domain, viewer } from '@sealos-storage-manager/encore-client'
 
 export type MountedPod = domain.MountedPod
 export type PVC = domain.PVC
@@ -8,6 +8,7 @@ export type ViewerSession = domain.ViewerSession
 export type ViewerToken = domain.ViewerToken
 export type Heartbeat = domain.Heartbeat
 export type StorageClass = domain.StorageClass
+export type ViewerContext = viewer.ViewerContext
 
 export type ViewerMode = 'readonly' | 'readwrite' | string
 export type ViewerStatus = 'active' | 'ready' | 'creating' | 'closed' | 'expired' | 'failed' | string
@@ -87,6 +88,7 @@ export interface ViewerAPI {
 	deletePVC: (input: DeletePVCInput) => Promise<PVC>
 	expandPVC: (input: ExpandPVCInput) => Promise<PVC>
 	getPodSession: (podSessionID: string) => Promise<PodSession>
+	getContext: () => Promise<ViewerContext>
 	getViewerSession: (viewerSessionID: string) => Promise<ViewerSession>
 	heartbeatViewerSession: (viewerSessionID: string) => Promise<Heartbeat>
 	issueViewerToken: (viewerSessionID: string) => Promise<ViewerToken>

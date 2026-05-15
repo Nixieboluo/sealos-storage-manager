@@ -152,7 +152,7 @@ export const en = {
 	},
 	volumes: {
 		create: 'Create PVC',
-		createDescription: 'Create a PersistentVolumeClaim in the selected namespace.',
+		createDescription: 'Create a PersistentVolumeClaim in the namespace from the current kubeconfig context.',
 		created: 'PVC created',
 		currentCapacity: 'Current capacity',
 		defaultStorageClass: 'Cluster default',

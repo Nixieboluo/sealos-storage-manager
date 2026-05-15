@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createViewerSessionMutationOptions, heartbeatViewerSessionMutationOptions } from '@/features/viewer/api/viewer-mutations'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
-import { pvcListQueryOptions, storageClassListQueryOptions, viewerSessionQueryOptions } from '@/features/viewer/api/viewer-query-options'
+import { pvcListQueryOptions, storageClassListQueryOptions, viewerContextQueryOptions, viewerSessionQueryOptions } from '@/features/viewer/api/viewer-query-options'
 import { createFakeViewerAPI } from '@/features/viewer/test/fakes'
 
 const mutationContext = {
@@ -17,12 +17,35 @@ describe('viewer query options', () => {
 		const options = pvcListQueryOptions('default', api)
 
 		expect(options.queryKey).toEqual(viewerKeys.pvcs('default'))
+		expect(options.enabled).toBe(true)
 		await expect(options.queryFn?.({
 			client: mutationContext.client,
 			meta: undefined,
 			queryKey: options.queryKey,
 			signal: new AbortController().signal,
 		})).resolves.toHaveLength(1)
+	})
+
+	it('disables PVC list queries until backend context provides a namespace', () => {
+		const options = pvcListQueryOptions('', createFakeViewerAPI())
+
+		expect(options.queryKey).toEqual(viewerKeys.pvcs(''))
+		expect(options.enabled).toBe(false)
+	})
+
+	it('uses a stable backend-owned context query key', async () => {
+		const api = createFakeViewerAPI()
+		const options = viewerContextQueryOptions(api)
+
+		expect(options.queryKey).toEqual(viewerKeys.context())
+		await expect(options.queryFn?.({
+			client: mutationContext.client,
+			meta: undefined,
+			queryKey: options.queryKey,
+			signal: new AbortController().signal,
+		})).resolves.toMatchObject({
+			namespace: 'ns-admin',
+		})
 	})
 
 	it('uses a stable storage class query key', async () => {

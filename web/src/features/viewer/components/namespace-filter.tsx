@@ -2,14 +2,9 @@ import { Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useViewerNamespace, useViewerSearch, viewerUIStore } from '@/features/viewer/stores/viewer-ui-store'
 
-interface NamespaceFilterProps {
-	namespaces: string[]
-}
-
-export function NamespaceFilter({ namespaces }: NamespaceFilterProps) {
+export function NamespaceFilter() {
 	const namespace = useViewerNamespace()
 	const search = useViewerSearch()
 	const { t } = useTranslation()
@@ -26,21 +21,14 @@ export function NamespaceFilter({ namespaces }: NamespaceFilterProps) {
 					value={search}
 				/>
 			</div>
-			<Select
-				onValueChange={value => viewerUIStore.actions.setNamespace(value)}
-				value={namespace}
-			>
-				<SelectTrigger aria-label={t('common.namespace')} className="w-full md:w-48">
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					{namespaces.map(item => (
-						<SelectItem key={item} value={item}>
-							{item}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
+			<div className="flex h-9 w-full items-center rounded-md border bg-muted px-3 text-sm md:w-48">
+				<span className="truncate text-muted-foreground">
+					{t('common.namespace')}
+					:
+					{' '}
+				</span>
+				<span className="truncate font-medium">{namespace || t('common.loading')}</span>
+			</div>
 		</div>
 	)
 }

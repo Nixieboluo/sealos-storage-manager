@@ -20,7 +20,7 @@ export const initialViewerUIState: ViewerUIState = {
 	activePodSessionID: null,
 	activeViewerSessionID: null,
 	locale: 'zh',
-	namespace: 'default',
+	namespace: '',
 	search: '',
 	selectedPVC: null,
 	view: 'volumes',
@@ -42,7 +42,7 @@ export const viewerUIStore = createStore(initialViewerUIState, store => ({
 		})),
 	setLocale: (locale: Locale) =>
 		store.setState(state => ({ ...state, locale })),
-	setNamespace: (namespace: string) =>
+	syncContextNamespace: (namespace: string) =>
 		store.setState(state => ({
 			...state,
 			namespace,

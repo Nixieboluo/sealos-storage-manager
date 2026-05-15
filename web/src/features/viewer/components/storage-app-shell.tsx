@@ -16,7 +16,7 @@ import {
 	RefreshCw,
 	Trash2,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -61,7 +61,7 @@ import {
 	deletePVCMutationOptions,
 	expandPVCMutationOptions,
 } from '@/features/viewer/api/viewer-mutations'
-import { pvcListQueryOptions, storageClassListQueryOptions } from '@/features/viewer/api/viewer-query-options'
+import { pvcListQueryOptions, storageClassListQueryOptions, viewerContextQueryOptions } from '@/features/viewer/api/viewer-query-options'
 import { ErrorCallout } from '@/features/viewer/components/error-callout'
 import { PVCListSkeleton } from '@/features/viewer/components/loading-skeletons'
 import { NamespaceFilter } from '@/features/viewer/components/namespace-filter'
@@ -79,7 +79,6 @@ interface CreatePVCForm {
 	accessMode: string
 	capacityGi: number
 	name: string
-	namespace: string
 	storageClassName: string
 }
 
@@ -124,16 +123,11 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const [deleteState, setDeleteState] = useState<DeletePVCState | null>(null)
 	const { i18n, t } = useTranslation()
 
-	const pvcQuery = useQuery(pvcListQueryOptions(namespace, api))
+	const contextQuery = useQuery(viewerContextQueryOptions(api))
+	const effectiveNamespace = contextQuery.data?.namespace ?? ''
+	const pvcQuery = useQuery(pvcListQueryOptions(effectiveNamespace, api))
 	const storageClassesQuery = useQuery(storageClassListQueryOptions(api))
 	const pvcs = useMemo(() => pvcQuery.data ?? [], [pvcQuery.data])
-	const namespaces = useMemo(() => {
-		const values = new Set(['default', namespace])
-		for (const pvc of pvcs) {
-			values.add(pvc.namespace)
-		}
-		return [...values].sort()
-	}, [namespace, pvcs])
 	const fileSession = useMemo<FileBrowserSession | null>(() => {
 		if (!token || !selectedPVC) {
 			return null
@@ -150,6 +144,12 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const createPVC = useMutation(createPVCMutationOptions(queryClient, api))
 	const expandPVCMutation = useMutation(expandPVCMutationOptions(queryClient, api))
 	const deletePVC = useMutation(deletePVCMutationOptions(queryClient, api))
+
+	useEffect(() => {
+		if (contextQuery.data?.namespace && contextQuery.data.namespace !== namespace) {
+			viewerUIStore.actions.syncContextNamespace(contextQuery.data.namespace)
+		}
+	}, [contextQuery.data?.namespace, namespace])
 
 	function openFiles(pvc: PVC) {
 		setSelectedPVC(pvc)
@@ -213,9 +213,10 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 							</TabsList>
 						</Tabs>
 						<div className="flex flex-col gap-2 md:ml-auto md:flex-row md:items-center">
-							<NamespaceFilter namespaces={namespaces} />
+							<NamespaceFilter />
 							<Button
 								aria-label={t('actions.refresh')}
+								disabled={!effectiveNamespace}
 								onClick={() => void pvcQuery.refetch()}
 								size="icon"
 								variant="outline"
@@ -238,6 +239,15 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 					</header>
 
 					<div className="min-h-0 flex-1 px-4 py-4">
+						{contextQuery.error
+							? (
+									<div className="mb-4">
+										<ErrorCallout title={t('common.error')}>
+											{translateViewerError(contextQuery.error, t)}
+										</ErrorCallout>
+									</div>
+								)
+							: null}
 						<Tabs
 							className="h-full"
 							onValueChange={value => viewerUIStore.actions.setView(value as ViewerView)}
@@ -245,6 +255,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 						>
 							<TabsContent className="m-0 flex h-full flex-col gap-4" value="volumes">
 								<VolumesView
+									canCreate={Boolean(effectiveNamespace)}
 									createOpen={createOpen}
 									onCreateOpenChange={setCreateOpen}
 									onDelete={pvc => setDeleteState({ pvc, confirmName: '' })}
@@ -288,7 +299,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 			</div>
 
 			<CreatePVCDialog
-				defaultNamespace={namespace}
+				namespace={effectiveNamespace}
 				mutation={createPVC}
 				onOpenChange={setCreateOpen}
 				open={createOpen}
@@ -335,6 +346,7 @@ function SidebarButton({ icon, label, value, view }: SidebarButtonProps) {
 }
 
 interface VolumesViewProps {
+	canCreate: boolean
 	createOpen: boolean
 	onCreateOpenChange: (open: boolean) => void
 	onDelete: (pvc: PVC) => void
@@ -346,6 +358,7 @@ interface VolumesViewProps {
 }
 
 function VolumesView({
+	canCreate,
 	onCreateOpenChange,
 	onDelete,
 	onExpand,
@@ -373,7 +386,7 @@ function VolumesView({
 					<h2 className="text-xl font-semibold">{t('nav.volumes')}</h2>
 					<p className="text-sm text-muted-foreground">{t('viewer.pvcListDescription')}</p>
 				</div>
-				<Button onClick={() => onCreateOpenChange(true)}>
+				<Button disabled={!canCreate} onClick={() => onCreateOpenChange(true)}>
 					<Plus data-icon="inline-start" />
 					{t('volumes.create')}
 				</Button>
@@ -549,16 +562,16 @@ function estimateUsagePercent(pvc: PVC) {
 }
 
 interface CreatePVCDialogProps {
-	defaultNamespace: string
 	mutation: UseMutationResult<PVC, Error, CreatePVCVariables>
+	namespace: string
 	onOpenChange: (open: boolean) => void
 	open: boolean
 	storageClasses: StorageClass[]
 }
 
 function CreatePVCDialog({
-	defaultNamespace,
 	mutation,
+	namespace,
 	onOpenChange,
 	open,
 	storageClasses,
@@ -566,7 +579,6 @@ function CreatePVCDialog({
 	const { t } = useTranslation()
 	const [form, setForm] = useState<CreatePVCForm>({
 		name: '',
-		namespace: defaultNamespace,
 		capacityGi: 10,
 		accessMode: 'ReadWriteOnce',
 		storageClassName: '__default__',
@@ -578,7 +590,7 @@ function CreatePVCDialog({
 
 	function submit() {
 		mutation.mutate({
-			namespace: form.namespace,
+			namespace,
 			name: form.name,
 			capacity: `${form.capacityGi}Gi`,
 			capacityBytes: form.capacityGi * 1024 * 1024 * 1024,
@@ -605,9 +617,14 @@ function CreatePVCDialog({
 					<FormField id="pvc-name" label={t('volumes.name')}>
 						<Input id="pvc-name" onChange={event => update({ name: event.target.value })} value={form.name} />
 					</FormField>
-					<FormField id="pvc-namespace" label={t('common.namespace')}>
-						<Input id="pvc-namespace" onChange={event => update({ namespace: event.target.value })} value={form.namespace} />
-					</FormField>
+					<div className="rounded-md border bg-muted px-3 py-2 text-sm">
+						<span className="text-muted-foreground">
+							{t('common.namespace')}
+							:
+							{' '}
+						</span>
+						<span className="font-medium">{namespace || t('common.loading')}</span>
+					</div>
 					<FormField id="pvc-capacity" label={t('viewer.capacity')}>
 						<Input
 							id="pvc-capacity"
@@ -655,7 +672,7 @@ function CreatePVCDialog({
 						{t('actions.cancel')}
 					</Button>
 					<Button
-						disabled={mutation.isPending || !form.name || !form.namespace || form.capacityGi <= 0}
+						disabled={mutation.isPending || !form.name || !namespace || form.capacityGi <= 0}
 						onClick={submit}
 					>
 						{t('actions.create')}

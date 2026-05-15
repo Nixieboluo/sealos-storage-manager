@@ -4,6 +4,7 @@ import type {
 	PVC,
 	StorageClass,
 	ViewerAPI,
+	ViewerContext,
 	ViewerSession,
 	ViewerToken,
 } from '@/features/viewer/types/viewer'
@@ -26,6 +27,14 @@ export function pvcFixture(overrides: Partial<PVC> = {}): PVC {
 			requires_node: false,
 		},
 		viewer_supported: true,
+		...overrides,
+	}
+}
+
+export function viewerContextFixture(overrides: Partial<ViewerContext> = {}): ViewerContext {
+	return {
+		context_name: 'dev',
+		namespace: 'ns-admin',
 		...overrides,
 	}
 }
@@ -140,6 +149,7 @@ export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerA
 				capacity: input.capacity,
 				capacity_bytes: input.capacityBytes,
 			}),
+		getContext: async () => viewerContextFixture(),
 		getPodSession: async id => podSessionFixture({ id }),
 		getViewerSession: async id => viewerSessionFixture({ id, status: 'ready', token_ready: true }),
 		heartbeatViewerSession: async id => heartbeatFixture({ viewer_session_id: id }),

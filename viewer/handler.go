@@ -112,6 +112,15 @@ type ListPVCsResponse struct {
 	PVCList PVCList `json:"pvc_list"`
 }
 
+type ViewerContext struct {
+	ContextName string `json:"context_name"`
+	Namespace   string `json:"namespace"`
+}
+
+type ContextResponse struct {
+	Context ViewerContext `json:"context"`
+}
+
 type PVCResponse struct {
 	PVC *domain.PVC `json:"pvc"`
 }
@@ -174,6 +183,11 @@ func NewHandler(
 
 func (h *Handler) ListPVCsData(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, error) {
 	response, apiErr := h.listPVCs(ctx, req)
+	return response, toEncoreError(apiErr)
+}
+
+func (h *Handler) GetContextData(ctx context.Context, req *AuthenticatedRequest) (*ContextResponse, error) {
+	response, apiErr := h.getContext(ctx, req)
 	return response, toEncoreError(apiErr)
 }
 
@@ -285,6 +299,11 @@ func (h *Handler) ListPVCs(w http.ResponseWriter, req *http.Request) {
 		Authorization: req.Header.Get("Authorization"),
 		Namespace:     req.URL.Query().Get("namespace"),
 	})
+	writeHTTPResponse(w, response, err)
+}
+
+func (h *Handler) GetContext(w http.ResponseWriter, req *http.Request) {
+	response, err := h.getContext(req.Context(), authenticatedRequest(req))
 	writeHTTPResponse(w, response, err)
 }
 
@@ -404,9 +423,10 @@ func (h *Handler) listPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCs
 		return nil, err
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
-	namespace := req.Namespace
-	if namespace == "" {
-		namespace = principal.Namespace
+	namespace := principal.Namespace
+	if err := requirePrincipalNamespace(req.Namespace, principal); err != nil {
+		h.observe(ctx, http.MethodGet, "/api/pvcs", err.Status, start)
+		return nil, err
 	}
 	if err := h.authz.CanListPVCs(ctx, principal, namespace); err != nil {
 		apiErr := apienv.NewError(403, apienv.CodePVCAccessDenied, "PVC access denied", nil)
@@ -426,6 +446,28 @@ func (h *Handler) listPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCs
 	return &ListPVCsResponse{PVCList: PVCList{Items: items}}, nil
 }
 
+func (h *Handler) getContext(ctx context.Context, req *AuthenticatedRequest) (*ContextResponse, *apienv.Error) {
+	start := time.Now()
+	principal, err := authenticateRequest(req)
+	if err != nil {
+		h.observe(ctx, http.MethodGet, "/api/context", err.Status, start)
+		return nil, err
+	}
+	ctx = authn.WithPrincipal(ctx, principal)
+	if err := h.authz.CanListPVCs(ctx, principal, principal.Namespace); err != nil {
+		apiErr := apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace access denied", nil)
+		h.observe(ctx, http.MethodGet, "/api/context", apiErr.Status, start)
+		return nil, apiErr
+	}
+	h.observe(ctx, http.MethodGet, "/api/context", http.StatusOK, start)
+	return &ContextResponse{
+		Context: ViewerContext{
+			ContextName: principal.ContextName,
+			Namespace:   principal.Namespace,
+		},
+	}, nil
+}
+
 func (h *Handler) createPVC(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, *apienv.Error) {
 	start := time.Now()
 	principal, err := authenticateRequest(req)
@@ -434,9 +476,10 @@ func (h *Handler) createPVC(ctx context.Context, req *CreatePVCRequest) (*PVCRes
 		return nil, err
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
-	namespace := req.Namespace
-	if namespace == "" {
-		namespace = principal.Namespace
+	namespace := principal.Namespace
+	if err := requirePrincipalNamespace(req.Namespace, principal); err != nil {
+		h.observe(ctx, http.MethodPost, "/api/pvcs", err.Status, start)
+		return nil, err
 	}
 	if err := h.authz.CanCreatePVC(ctx, principal, namespace); err != nil {
 		apiErr := apienv.NewError(403, apienv.CodePVCCreateForbidden, "PVC create access denied", nil)
@@ -473,9 +516,11 @@ func (h *Handler) deletePVC(
 		return nil, err
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
-	if namespace == "" {
-		namespace = principal.Namespace
+	if err := requirePrincipalNamespace(namespace, principal); err != nil {
+		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", err.Status, start)
+		return nil, err
 	}
+	namespace = principal.Namespace
 	if err := h.authz.CanDeletePVC(ctx, principal, namespace, name); err != nil {
 		apiErr := apienv.NewError(403, apienv.CodePVCDeleteForbidden, "PVC delete access denied", nil)
 		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", apiErr.Status, start)
@@ -507,9 +552,11 @@ func (h *Handler) expandPVC(
 		return nil, err
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
-	if namespace == "" {
-		namespace = principal.Namespace
+	if err := requirePrincipalNamespace(namespace, principal); err != nil {
+		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", err.Status, start)
+		return nil, err
 	}
+	namespace = principal.Namespace
 	if err := h.authz.CanUpdatePVC(ctx, principal, namespace, name); err != nil {
 		apiErr := apienv.NewError(403, apienv.CodePVCExpandForbidden, "PVC expand access denied", nil)
 		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", apiErr.Status, start)
@@ -570,9 +617,10 @@ func (h *Handler) createViewerSession(
 		return nil, err
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
-	namespace := req.Namespace
-	if namespace == "" {
-		namespace = principal.Namespace
+	namespace := principal.Namespace
+	if err := requirePrincipalNamespace(req.Namespace, principal); err != nil {
+		h.observe(ctx, http.MethodPost, "/api/viewer-sessions", err.Status, start)
+		return nil, err
 	}
 	if req.PVCName == "" {
 		apiErr := apienv.NewError(400, apienv.CodeValidationError, "pvc_name is required", nil)
@@ -598,6 +646,13 @@ func (h *Handler) createViewerSession(
 	return &ViewerSessionResponse{
 		ViewerSession: viewerSession,
 	}, nil
+}
+
+func requirePrincipalNamespace(namespace string, principal *authn.Principal) *apienv.Error {
+	if namespace == "" || namespace == principal.Namespace {
+		return nil
+	}
+	return apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace must match kubeconfig context namespace", nil)
 }
 
 func (h *Handler) getViewerSession(

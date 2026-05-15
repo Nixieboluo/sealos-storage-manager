@@ -152,7 +152,7 @@ export const zh = {
 	},
 	volumes: {
 		create: '新建存储卷',
-		createDescription: '在选定命名空间中创建 PersistentVolumeClaim。',
+		createDescription: '在当前 kubeconfig context 的命名空间中创建 PersistentVolumeClaim。',
 		created: 'PVC 已创建',
 		currentCapacity: '当前容量',
 		defaultStorageClass: '集群默认',

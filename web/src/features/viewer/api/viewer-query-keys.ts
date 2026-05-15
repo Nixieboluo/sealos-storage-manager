@@ -1,5 +1,6 @@
 export const viewerKeys = {
 	all: ['viewer'] as const,
+	context: () => [...viewerKeys.all, 'context'] as const,
 	podSession: (podSessionID: string) =>
 		[...viewerKeys.all, 'pod-session', podSessionID] as const,
 	pvcs: (namespace: string) => [...viewerKeys.all, 'pvcs', namespace] as const,

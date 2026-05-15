@@ -3,12 +3,11 @@ import { Buffer } from 'node:buffer'
 import { expect, test } from '@playwright/test'
 
 const destructive = process.env.E2E_RUN_DESTRUCTIVE === '1'
-const namespace = process.env.E2E_NAMESPACE
 const storageClass = process.env.E2E_STORAGE_CLASS
 const hasKubeconfig = Boolean(process.env.VITE_DEV_KUBECONFIG)
 
 test.describe('real Storage Manager workflow', () => {
-	test.skip(!destructive || !namespace || !hasKubeconfig, 'Set VITE_DEV_KUBECONFIG, E2E_NAMESPACE, and E2E_RUN_DESTRUCTIVE=1 to run real e2e.')
+	test.skip(!destructive || !hasKubeconfig, 'Set VITE_DEV_KUBECONFIG and E2E_RUN_DESTRUCTIVE=1 to run real e2e.')
 
 	test('creates, expands, opens, manages files, and deletes a real PVC', async ({ page }) => {
 		const pvcName = `sm-e2e-${Date.now()}`
@@ -16,7 +15,6 @@ test.describe('real Storage Manager workflow', () => {
 
 		await page.getByRole('button', { name: /create pvc|新建存储卷/i }).click()
 		await page.getByLabel(/name|名称/i).fill(pvcName)
-		await page.getByLabel(/namespace|命名空间/i).fill(namespace!)
 		await page.getByLabel(/capacity|容量/i).fill('1')
 		if (storageClass) {
 			await page.getByLabel(/storage class|存储类/i).click()

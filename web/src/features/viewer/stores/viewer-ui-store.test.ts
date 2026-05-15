@@ -6,7 +6,7 @@ describe('viewerUIStore', () => {
 	it('tracks namespace, selected PVC, active session, and reset', () => {
 		viewerUIStore.actions.reset()
 
-		viewerUIStore.actions.setNamespace('prod')
+		viewerUIStore.actions.syncContextNamespace('prod')
 		viewerUIStore.actions.setSearch('mysql')
 		viewerUIStore.actions.selectPVC({
 			namespace: 'prod',
