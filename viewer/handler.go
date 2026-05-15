@@ -156,7 +156,7 @@ type FileBrowserHookVerificationResponse struct {
 }
 
 type ErrorDetails struct {
-	Code string `json:"code"`
+	Code apienv.Code `json:"code"`
 }
 
 func (ErrorDetails) ErrDetails() {}
@@ -964,8 +964,10 @@ func toEncoreErrorCode(status int) errs.ErrCode {
 		return errs.NotFound
 	case http.StatusConflict:
 		return errs.Aborted
-	case http.StatusServiceUnavailable:
+	case http.StatusBadGateway, http.StatusServiceUnavailable:
 		return errs.Unavailable
+	case http.StatusGatewayTimeout:
+		return errs.DeadlineExceeded
 	default:
 		return errs.Internal
 	}

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/filebrowser"
@@ -99,7 +100,7 @@ func (s *AuthService) IssueToken(
 	finishLogin(err)
 	if err != nil {
 		s.recorder.ObserveFileBrowserLogin("error")
-		return nil, fmt.Errorf("issuing filebrowser token: %w", err)
+		return nil, apienv.NewError(502, apienv.CodeFileBrowserLoginFailed, "File Browser login failed", nil)
 	}
 	s.recorder.ObserveFileBrowserLogin("success")
 

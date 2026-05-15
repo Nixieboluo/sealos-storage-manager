@@ -3,6 +3,7 @@ package viewer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"encore.dev/beta/errs"
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/authn"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
@@ -464,6 +467,27 @@ func TestHandlerVerifyHookReturnsAllowEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "filebrowser_hook_verification") {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestToEncoreErrorPreservesBusinessCodeAndRetryableStatus(t *testing.T) {
+	t.Setenv("ENCORERUNTIME_NOPANIC", "1")
+
+	err := toEncoreError(apienv.NewError(502, apienv.CodeFileBrowserLoginFailed, "File Browser login failed", nil))
+
+	var encoreErr *errs.Error
+	if !errors.As(err, &encoreErr) {
+		t.Fatalf("toEncoreError() = %T %v, want *errs.Error", err, err)
+	}
+	if encoreErr.Code != errs.Unavailable {
+		t.Fatalf("encore code = %s, want unavailable", encoreErr.Code)
+	}
+	details, ok := encoreErr.Details.(ErrorDetails)
+	if !ok {
+		t.Fatalf("details = %T, want ErrorDetails", encoreErr.Details)
+	}
+	if details.Code != apienv.CodeFileBrowserLoginFailed {
+		t.Fatalf("business code = %s", details.Code)
 	}
 }
 

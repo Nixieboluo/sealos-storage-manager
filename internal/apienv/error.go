@@ -7,34 +7,72 @@ import (
 )
 
 const (
-	CodePVCAlreadyExists       = "PVC_ALREADY_EXISTS"
-	CodePVCNotFound            = "PVC_NOT_FOUND"
-	CodePVCAccessDenied        = "PVC_ACCESS_DENIED"
-	CodePVCInUse               = "PVC_IN_USE"
-	CodePVCCreateForbidden     = "PVC_CREATE_FORBIDDEN"
-	CodePVCDeleteForbidden     = "PVC_DELETE_FORBIDDEN"
-	CodePVCExpandForbidden     = "PVC_EXPAND_FORBIDDEN"
-	CodePVCExpandUnsupported   = "PVC_EXPAND_UNSUPPORTED"
-	CodePVCExpandNotIncreased  = "PVC_EXPAND_NOT_INCREASED"
-	CodeStorageClassNotFound   = "STORAGE_CLASS_NOT_FOUND"
-	CodeUnsupportedAccessMode  = "UNSUPPORTED_ACCESS_MODE"
-	CodePVCMountConflict       = "PVC_MOUNT_CONFLICT"
-	CodePVCMountPending        = "PVC_MOUNT_PENDING"
-	CodeViewerPodCreating      = "VIEWER_POD_CREATING"
-	CodeViewerPodFailed        = "VIEWER_POD_FAILED"
-	CodeViewerSessionNotFound  = "VIEWER_SESSION_NOT_FOUND"
-	CodeViewerSessionExpired   = "VIEWER_SESSION_EXPIRED"
-	CodeAuthRequestExpired     = "AUTH_REQUEST_EXPIRED"
-	CodeAuthRequestUsed        = "AUTH_REQUEST_USED"
-	CodeFileBrowserLoginFailed = "FILEBROWSER_LOGIN_FAILED"
-	CodeHookVerifyFailed       = "HOOK_VERIFY_FAILED"
-	CodeUnauthorized           = "UNAUTHORIZED"
-	CodeValidationError        = "VALIDATION_ERROR"
-	CodeInternal               = "INTERNAL_ERROR"
+	CodePVCAlreadyExists       Code = "PVC_ALREADY_EXISTS"
+	CodePVCNotFound            Code = "PVC_NOT_FOUND"
+	CodePVCAccessDenied        Code = "PVC_ACCESS_DENIED"
+	CodePVCInUse               Code = "PVC_IN_USE"
+	CodePVCCreateForbidden     Code = "PVC_CREATE_FORBIDDEN"
+	CodePVCDeleteForbidden     Code = "PVC_DELETE_FORBIDDEN"
+	CodePVCExpandForbidden     Code = "PVC_EXPAND_FORBIDDEN"
+	CodePVCExpandUnsupported   Code = "PVC_EXPAND_UNSUPPORTED"
+	CodePVCExpandNotIncreased  Code = "PVC_EXPAND_NOT_INCREASED"
+	CodeStorageClassNotFound   Code = "STORAGE_CLASS_NOT_FOUND"
+	CodeUnsupportedAccessMode  Code = "UNSUPPORTED_ACCESS_MODE"
+	CodePVCMountConflict       Code = "PVC_MOUNT_CONFLICT"
+	CodePVCMountPending        Code = "PVC_MOUNT_PENDING"
+	CodeViewerPodCreating      Code = "VIEWER_POD_CREATING"
+	CodeViewerPodFailed        Code = "VIEWER_POD_FAILED"
+	CodeViewerSessionNotFound  Code = "VIEWER_SESSION_NOT_FOUND"
+	CodeViewerSessionExpired   Code = "VIEWER_SESSION_EXPIRED"
+	CodeAuthRequestExpired     Code = "AUTH_REQUEST_EXPIRED"
+	CodeAuthRequestUsed        Code = "AUTH_REQUEST_USED"
+	CodeFileBrowserLoginFailed Code = "FILEBROWSER_LOGIN_FAILED"
+	CodeHookVerifyFailed       Code = "HOOK_VERIFY_FAILED"
+	CodeUnauthorized           Code = "UNAUTHORIZED"
+	CodeValidationError        Code = "VALIDATION_ERROR"
+	CodeInternal               Code = "INTERNAL_ERROR"
 )
 
+type Code string
+
+var AllCodes = [...]Code{
+	CodePVCAlreadyExists,
+	CodePVCNotFound,
+	CodePVCAccessDenied,
+	CodePVCInUse,
+	CodePVCCreateForbidden,
+	CodePVCDeleteForbidden,
+	CodePVCExpandForbidden,
+	CodePVCExpandUnsupported,
+	CodePVCExpandNotIncreased,
+	CodeStorageClassNotFound,
+	CodeUnsupportedAccessMode,
+	CodePVCMountConflict,
+	CodePVCMountPending,
+	CodeViewerPodCreating,
+	CodeViewerPodFailed,
+	CodeViewerSessionNotFound,
+	CodeViewerSessionExpired,
+	CodeAuthRequestExpired,
+	CodeAuthRequestUsed,
+	CodeFileBrowserLoginFailed,
+	CodeHookVerifyFailed,
+	CodeUnauthorized,
+	CodeValidationError,
+	CodeInternal,
+}
+
+func IsCode(code Code) bool {
+	for _, known := range AllCodes {
+		if known == code {
+			return true
+		}
+	}
+	return false
+}
+
 type Error struct {
-	Code    string         `json:"code"`
+	Code    Code           `json:"code"`
 	Message string         `json:"message"`
 	Details map[string]any `json:"details"`
 	Status  int            `json:"-"`
@@ -44,10 +82,10 @@ func (err *Error) Error() string {
 	if err == nil {
 		return ""
 	}
-	return err.Code + ": " + err.Message
+	return string(err.Code) + ": " + err.Message
 }
 
-func NewError(status int, code string, message string, details map[string]any) *Error {
+func NewError(status int, code Code, message string, details map[string]any) *Error {
 	if details == nil {
 		details = map[string]any{}
 	}

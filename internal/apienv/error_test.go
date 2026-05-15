@@ -7,6 +7,59 @@ import (
 	"testing"
 )
 
+func TestAllCodesContainsEveryPublicBusinessCode(t *testing.T) {
+	t.Parallel()
+
+	seen := make(map[Code]bool, len(AllCodes))
+	for _, code := range AllCodes {
+		if code == "" {
+			t.Fatal("AllCodes contains an empty error code")
+		}
+		if seen[code] {
+			t.Fatalf("AllCodes contains duplicate code %q", code)
+		}
+		seen[code] = true
+	}
+
+	want := []Code{
+		CodePVCAlreadyExists,
+		CodePVCNotFound,
+		CodePVCAccessDenied,
+		CodePVCInUse,
+		CodePVCCreateForbidden,
+		CodePVCDeleteForbidden,
+		CodePVCExpandForbidden,
+		CodePVCExpandUnsupported,
+		CodePVCExpandNotIncreased,
+		CodeStorageClassNotFound,
+		CodeUnsupportedAccessMode,
+		CodePVCMountConflict,
+		CodePVCMountPending,
+		CodeViewerPodCreating,
+		CodeViewerPodFailed,
+		CodeViewerSessionNotFound,
+		CodeViewerSessionExpired,
+		CodeAuthRequestExpired,
+		CodeAuthRequestUsed,
+		CodeFileBrowserLoginFailed,
+		CodeHookVerifyFailed,
+		CodeUnauthorized,
+		CodeValidationError,
+		CodeInternal,
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("AllCodes count = %d, want %d", len(seen), len(want))
+	}
+	for _, code := range want {
+		if !IsCode(code) {
+			t.Fatalf("AllCodes missing %q", code)
+		}
+	}
+	if IsCode("NOT_A_REAL_CODE") {
+		t.Fatal("IsCode accepted an unknown code")
+	}
+}
+
 func TestWriteSuccess(t *testing.T) {
 	t.Parallel()
 

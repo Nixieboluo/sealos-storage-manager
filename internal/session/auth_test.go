@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
@@ -54,6 +56,32 @@ func TestIssueTokenCreatesOneTimeAuthRequestAndTokenRecord(t *testing.T) {
 	}
 	if len(login.password) > 72 {
 		t.Fatalf("password length = %d, exceeds bcrypt limit", len(login.password))
+	}
+}
+
+func TestIssueTokenMapsFileBrowserLoginFailure(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	store := state.New(cfg.Cache)
+	auth := NewAuthService(
+		cfg,
+		store,
+		&fakeLogin{err: errors.New("filebrowser login returned status 403")},
+		observability.MustNew(cfg.Observability, nil),
+	)
+	auth.now = fixedNow
+	viewer := &domain.ViewerSession{ID: "vs_1", Permission: domain.ModeReadWrite}
+	pod := &domain.PodSession{ID: "ps_1", ViewerURL: "http://viewer", Status: domain.PodStatusReady}
+
+	_, err := auth.IssueToken(t.Context(), viewer, pod)
+
+	var apiErr *apienv.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("IssueToken() error = %T %v, want apienv.Error", err, err)
+	}
+	if apiErr.Code != apienv.CodeFileBrowserLoginFailed || apiErr.Status != 502 {
+		t.Fatalf("api error = %#v", apiErr)
 	}
 }
 
