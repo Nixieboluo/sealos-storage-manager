@@ -16,8 +16,10 @@ export function SessionLifecycleBanner({ session }: SessionLifecycleBannerProps)
 	if (!session) {
 		return (
 			<Alert>
-				<Clock3 />
-				<AlertTitle>{t('viewer.sessionLifecycle')}</AlertTitle>
+				<AlertTitle className="flex items-center gap-2">
+					<Clock3 className="size-4" />
+					{t('viewer.sessionLifecycle')}
+				</AlertTitle>
 				<AlertDescription>{t('viewer.noSelection')}</AlertDescription>
 			</Alert>
 		)
@@ -25,19 +27,44 @@ export function SessionLifecycleBanner({ session }: SessionLifecycleBannerProps)
 
 	return (
 		<Alert>
-			<Clock3 />
 			<AlertTitle className="flex items-center gap-2">
+				<Clock3 className="size-4" />
 				{t('viewer.activeSession')}
 				<ViewerSessionStatusBadge session={session} />
 			</AlertTitle>
-			<AlertDescription>
-				{t('viewer.podSession')}
-				{': '}
-				{session.pod_session_id}
-				{' · '}
-				{t('viewer.lastHeartbeat')}
-				{': '}
-				{session.last_heartbeat_at || '-'}
+			<AlertDescription className="grid gap-1">
+				<span>
+					{t('viewer.podSession')}
+					{': '}
+					{session.pod_session_id}
+					{' · '}
+					{t('status.label')}
+					{': '}
+					{session.pod_status}
+				</span>
+				<span>
+					{t('viewer.viewerUrl')}
+					{': '}
+					{session.viewer_url || '-'}
+				</span>
+				<span>
+					{t('viewer.viewerMode')}
+					{': '}
+					{session.mode}
+					{' · '}
+					{t('viewer.lastHeartbeat')}
+					{': '}
+					{session.last_heartbeat_at || '-'}
+				</span>
+				{session.reason
+					? (
+							<span>
+								{t('viewer.scheduling')}
+								{': '}
+								{session.reason}
+							</span>
+						)
+					: null}
 			</AlertDescription>
 		</Alert>
 	)
