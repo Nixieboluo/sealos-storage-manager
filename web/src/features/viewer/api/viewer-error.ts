@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next'
 import type { ViewerApiErrorShape, ViewerErrorCode } from '@/features/viewer/types/viewer'
 
 import { isAPIError } from '@sealos-storage-manager/encore-client'
+import { backendViewerErrorCodes } from '@/features/viewer/types/viewer'
 
 export const viewerErrorMessageKeys = {
 	PVC_NOT_FOUND: 'errors.pvcNotFound',
@@ -35,8 +36,10 @@ interface EncoreErrorDetails {
 	code?: string
 }
 
+const backendViewerErrorCodeSet = new Set<string>(backendViewerErrorCodes)
+
 export class ViewerApiError extends Error implements ViewerApiErrorShape {
-	readonly code: string
+	readonly code: ViewerErrorCode
 	readonly details: Record<string, unknown>
 	readonly status?: number
 
@@ -57,13 +60,24 @@ function detailCode(details: unknown): string | undefined {
 	return typed.Code ?? typed.code
 }
 
+export function isViewerErrorCode(code: string): code is ViewerErrorCode {
+	return backendViewerErrorCodeSet.has(code)
+}
+
+function normalizeViewerErrorCode(code: string | undefined): ViewerErrorCode {
+	if (code && isViewerErrorCode(code)) {
+		return code
+	}
+	return 'INTERNAL_ERROR'
+}
+
 export function normalizeViewerError(error: unknown): ViewerApiError {
 	if (error instanceof ViewerApiError) {
 		return error
 	}
 	if (isAPIError(error)) {
 		return new ViewerApiError({
-			code: detailCode(error.details) ?? error.code,
+			code: normalizeViewerErrorCode(detailCode(error.details) ?? error.code),
 			details: typeof error.details === 'object' && error.details !== null
 				? error.details as Record<string, unknown>
 				: {},
@@ -87,8 +101,8 @@ export function isViewerApiError(error: unknown): error is ViewerApiError {
 	return error instanceof ViewerApiError
 }
 
-export function viewerErrorMessageKey(code: string) {
-	return viewerErrorMessageKeys[code as ViewerErrorCode] ?? 'errors.generic'
+export function viewerErrorMessageKey(code: ViewerErrorCode) {
+	return viewerErrorMessageKeys[code]
 }
 
 export function translateViewerError(error: unknown, t: TFunction) {

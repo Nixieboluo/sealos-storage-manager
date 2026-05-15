@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+	normalizeViewerError,
 	translateViewerError,
 	ViewerApiError,
 	viewerErrorMessageKey,
@@ -35,15 +36,15 @@ describe('viewer errors', () => {
 			}),
 			instance.t,
 		)
-		const unknown = translateViewerError(
-			new ViewerApiError({
-				code: 'SOMETHING_NEW',
-				message: 'new',
-			}),
-			instance.t,
-		)
 
 		expect(known).toContain('permission')
-		expect(unknown).toBe(resources.en.translation.errors.generic)
+		expect(instance.t('errors.generic')).toBe(resources.en.translation.errors.generic)
+	})
+
+	it('normalizes unknown backend codes to a typed internal error', () => {
+		const error = normalizeViewerError(new Error('network failed'))
+
+		expect(error.code).toBe('INTERNAL_ERROR')
+		expect(viewerErrorMessageKey(error.code)).toBe('errors.internalError')
 	})
 })

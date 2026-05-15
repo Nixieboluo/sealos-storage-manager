@@ -15,7 +15,7 @@ export type ViewerStatus = 'active' | 'ready' | 'creating' | 'closed' | 'expired
 export type PodStatus = 'creating' | 'ready' | 'failed' | 'terminating' | 'terminated' | string
 
 export interface ViewerApiErrorShape {
-	code: ViewerErrorCode | string
+	code: ViewerErrorCode
 	details?: Record<string, unknown>
 	message: string
 	status?: number

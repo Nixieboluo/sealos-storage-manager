@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { FileBrowserClient } from '../client'
+import { fileBrowserErrorCodeFromStatus } from '../errors'
 
 describe('fileBrowserClient', () => {
 	it('calls typed File Browser resource APIs with auth headers', async () => {
@@ -68,5 +69,12 @@ describe('fileBrowserClient', () => {
 			code: 'FILE_CONFLICT',
 			status: 409,
 		})
+	})
+
+	it('maps File Browser HTTP statuses to a closed error-code union', () => {
+		expect(fileBrowserErrorCodeFromStatus(403)).toBe('FILEBROWSER_FORBIDDEN')
+		expect(fileBrowserErrorCodeFromStatus(404)).toBe('FILEBROWSER_NOT_FOUND')
+		expect(fileBrowserErrorCodeFromStatus(409)).toBe('FILE_CONFLICT')
+		expect(fileBrowserErrorCodeFromStatus(599)).toBe('FILEBROWSER_REQUEST_FAILED')
 	})
 })
