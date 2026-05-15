@@ -13,7 +13,7 @@ describe('storageAppShell', () => {
 		viewerUIStore.actions.reset()
 	})
 
-	it('renders PVCs, filters them, launches a viewer, and shows token-backed open action', async () => {
+	it('renders PVCs, filters them, launches File Browser, and shows real file manager state', async () => {
 		const user = userEvent.setup()
 		const api = createFakeViewerAPI({
 			createViewerSession: vi.fn().mockResolvedValue(viewerSessionFixture({
@@ -37,14 +37,41 @@ describe('storageAppShell', () => {
 		expect(screen.getByText('logs')).toBeInTheDocument()
 
 		await user.type(screen.getByLabelText('Search'), 'mysql')
+		await waitFor(() => expect(screen.queryByText('logs')).not.toBeInTheDocument())
 		expect(screen.getByText('mysql-data')).toBeInTheDocument()
-		expect(screen.queryByText('logs')).not.toBeInTheDocument()
 
-		await user.click(screen.getByRole('button', { name: /launch viewer/i }))
-		await user.click(screen.getByRole('tab', { name: 'Viewer' }))
+		await user.click(screen.getByRole('button', { name: /browse files/i }))
 
-		await waitFor(() => expect(screen.getByText('https://viewer.example.test')).toBeInTheDocument())
-		expect(screen.getByRole('link', { name: /open file browser/i })).toHaveAttribute('href', 'https://viewer.example.test')
+		await waitFor(() => expect(screen.getByRole('button', { name: /new folder/i })).toBeInTheDocument())
+	})
+
+	it('creates PVCs through the real dialog and optimistic mutation path', async () => {
+		const user = userEvent.setup()
+		const createPVC = vi.fn().mockResolvedValue(pvcFixture({
+			name: 'cache-data',
+			uid: 'cache-uid',
+			capacity: '5Gi',
+			capacity_bytes: 5 * 1024 * 1024 * 1024,
+		}))
+		const api = createFakeViewerAPI({
+			createPVC,
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
+		await user.type(screen.getByLabelText('Name'), 'cache-data')
+		const capacityInput = screen.getByLabelText('Capacity')
+		await user.clear(capacityInput)
+		await user.type(capacityInput, '5')
+		await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+		await waitFor(() => expect(createPVC).toHaveBeenCalledWith(expect.objectContaining({
+			name: 'cache-data',
+			capacity: '5Gi',
+			capacityBytes: 5 * 1024 * 1024 * 1024,
+		})))
 	})
 
 	it('shows localized API errors', async () => {

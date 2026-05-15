@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -145,12 +144,6 @@ func (g *localCounterGroup[L]) Values() map[L]uint64 {
 	}
 	return out
 }
-
-type noopCounter struct{}
-
-func (noopCounter) Add(uint64) {}
-
-func (noopCounter) Increment() {}
 
 type mirroredCounter struct {
 	encore Counter
@@ -326,7 +319,8 @@ func (r *Recorder) TraceOperation(ctx context.Context, name string, attrs ...slo
 		r.metrics.operationRequests.With(OperationLabels{Operation: name, Result: result}).Increment()
 		r.metrics.operationDurationMS.With(OperationLabels{Operation: name, Result: result}).
 			Add(durationMilliseconds(duration))
-		endFields := append(fields,
+		endFields := append([]slog.Attr{}, fields...)
+		endFields = append(endFields,
 			slog.String("result", result),
 			slog.Duration("duration", duration),
 		)
@@ -403,7 +397,7 @@ func (r *Recorder) WritePrometheus(w http.ResponseWriter, _ *http.Request) {
 }
 
 func newLogger(cfg config.ObservabilityConfig, out io.Writer) (*Logger, error) {
-	level := logLevelInfo
+	var level logLevel
 	switch normalized(cfg.Logs.Level) {
 	case "", "info":
 		level = logLevelInfo
@@ -565,14 +559,6 @@ func prometheusEscape(value string) string {
 	value = strings.ReplaceAll(value, `"`, `\"`)
 	value = strings.ReplaceAll(value, "\n", `\n`)
 	return value
-}
-
-func runningUnderEncore() bool {
-	return normalized(getenv("ENCORERUNTIME_NOPANIC")) == ""
-}
-
-var getenv = func(key string) string {
-	return os.Getenv(key)
 }
 
 func argsToAttrs(args []any) []slog.Attr {

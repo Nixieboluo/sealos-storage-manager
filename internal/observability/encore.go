@@ -1,8 +1,12 @@
+//go:build encore_app
+
 package observability
 
 import (
+	"os"
 	"strings"
 
+	encore "encore.dev"
 	"encore.dev/rlog"
 )
 
@@ -11,6 +15,10 @@ func newEncoreLogSink() logSink {
 		return nil
 	}
 	return encoreLogSink{}
+}
+
+func runningUnderEncore() bool {
+	return normalized(os.Getenv("ENCORERUNTIME_NOPANIC")) == ""
 }
 
 type encoreLogSink struct{}
@@ -42,4 +50,22 @@ func recoverEncoreUnavailable() {
 func isEncoreRuntimeUnavailable(value any) bool {
 	msg, ok := value.(string)
 	return ok && strings.Contains(msg, "encore apps must be run using the encore command")
+}
+
+func currentEncoreTrace() *encoreTraceData {
+	req := currentEncoreRequest()
+	if req == nil || req.Trace == nil {
+		return nil
+	}
+	return &encoreTraceData{
+		TraceID:      req.Trace.TraceID,
+		SpanID:       req.Trace.SpanID,
+		ParentSpanID: req.Trace.ParentSpanID,
+		Recorded:     req.Trace.Recorded,
+	}
+}
+
+func currentEncoreRequest() (req *encore.Request) {
+	defer recoverEncoreUnavailable()
+	return encore.CurrentRequest()
 }

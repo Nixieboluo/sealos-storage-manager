@@ -25,12 +25,14 @@ import (
 )
 
 type fakeViewerService struct {
-	pvcs       []domain.PVC
-	created    *domain.ViewerSession
-	token      *domain.ViewerToken
-	heartbeat  *domain.Heartbeat
-	closed     *domain.ViewerSession
-	podSession *domain.PodSession
+	pvcs           []domain.PVC
+	pvc            *domain.PVC
+	storageClasses []domain.StorageClass
+	created        *domain.ViewerSession
+	token          *domain.ViewerToken
+	heartbeat      *domain.Heartbeat
+	closed         *domain.ViewerSession
+	podSession     *domain.PodSession
 }
 
 const testKubeconfig = `apiVersion: v1
@@ -55,6 +57,22 @@ contexts:
 
 func (f *fakeViewerService) ListPVCs(_ context.Context, _ string) ([]domain.PVC, error) {
 	return f.pvcs, nil
+}
+
+func (f *fakeViewerService) CreatePVC(_ context.Context, _ session.CreatePVCInput) (*domain.PVC, error) {
+	return f.pvc, nil
+}
+
+func (f *fakeViewerService) DeletePVC(_ context.Context, _ session.DeletePVCInput) (*domain.PVC, error) {
+	return f.pvc, nil
+}
+
+func (f *fakeViewerService) ExpandPVC(_ context.Context, _ session.ExpandPVCInput) (*domain.PVC, error) {
+	return f.pvc, nil
+}
+
+func (f *fakeViewerService) ListStorageClasses(_ context.Context) ([]domain.StorageClass, error) {
+	return f.storageClasses, nil
 }
 
 func (f *fakeViewerService) CreateViewerSession(
@@ -121,6 +139,32 @@ func (allowAuthorizer) CanGetPVC(
 	return nil
 }
 
+func (allowAuthorizer) CanCreatePVC(_ context.Context, _ *authn.Principal, _ string) error {
+	return nil
+}
+
+func (allowAuthorizer) CanDeletePVC(
+	_ context.Context,
+	_ *authn.Principal,
+	_ string,
+	_ string,
+) error {
+	return nil
+}
+
+func (allowAuthorizer) CanUpdatePVC(
+	_ context.Context,
+	_ *authn.Principal,
+	_ string,
+	_ string,
+) error {
+	return nil
+}
+
+func (allowAuthorizer) CanListStorageClasses(_ context.Context, _ *authn.Principal) error {
+	return nil
+}
+
 func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
 	t.Parallel()
 
@@ -150,6 +194,95 @@ func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if len(body["pvc_list"].Items) != 1 {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerCreatePVCUsesEnvelope(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{
+			pvc: &domain.PVC{Namespace: "ns", Name: "data", Capacity: "10Gi"},
+		},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/pvcs",
+		strings.NewReader(`{"namespace":"ns","name":"data","capacity":"10Gi","access_modes":["ReadWriteOnce"]}`),
+	)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.CreatePVC(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"pvc"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerExpandPVCUsesPathParams(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{
+			pvc: &domain.PVC{Namespace: "ns", Name: "data", Capacity: "20Gi"},
+		},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/pvcs/ns/data/expand",
+		strings.NewReader(`{"capacity":"20Gi"}`),
+	)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.ExpandPVC(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"capacity":"20Gi"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerListStorageClassesUsesEnvelope(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{
+			storageClasses: []domain.StorageClass{{Name: "standard", Provisioner: "test"}},
+		},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/storage-classes", nil)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.ListStorageClasses(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"storage_class_list"`) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }

@@ -1,9 +1,15 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
-import { closePodSessionMutationOptions, closeViewerSessionMutationOptions } from '@/features/viewer/api/viewer-mutations'
+import {
+	closePodSessionMutationOptions,
+	closeViewerSessionMutationOptions,
+	createPVCMutationOptions,
+	deletePVCMutationOptions,
+	expandPVCMutationOptions,
+} from '@/features/viewer/api/viewer-mutations'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
-import { createFakeViewerAPI, viewerSessionFixture } from '@/features/viewer/test/fakes'
+import { createFakeViewerAPI, pvcFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
 
 const mutationContext = {
 	client: new QueryClient(),
@@ -38,5 +44,73 @@ describe('viewer mutation options', () => {
 			queryKey: viewerKeys.podSession('ps_1'),
 		})
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: viewerKeys.all })
+	})
+
+	it('optimistically creates PVCs and replaces them with server data', async () => {
+		const queryClient = new QueryClient()
+		const key = viewerKeys.pvcs('default')
+		queryClient.setQueryData(key, [pvcFixture({ name: 'existing' })])
+		const options = createPVCMutationOptions(queryClient, createFakeViewerAPI())
+		const input = {
+			namespace: 'default',
+			name: 'cache-data',
+			capacity: '5Gi',
+			capacityBytes: 5 * 1024 * 1024 * 1024,
+			accessModes: ['ReadWriteOnce'],
+		}
+
+		const context = await options.onMutate?.(input, mutationContext)
+
+		expect(queryClient.getQueryData(key)).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: 'cache-data', uid: expect.stringContaining('optimistic') }),
+		]))
+
+		if (!context) {
+			throw new Error('missing mutation context')
+		}
+		await options.onSuccess?.(pvcFixture({ name: 'cache-data', uid: 'server-uid' }), input, context, mutationContext)
+
+		expect(queryClient.getQueryData(key)).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: 'cache-data', uid: 'server-uid' }),
+		]))
+	})
+
+	it('optimistically deletes PVCs and rolls back on error', async () => {
+		const queryClient = new QueryClient()
+		const key = viewerKeys.pvcs('default')
+		const original = [pvcFixture({ name: 'mysql-data' })]
+		queryClient.setQueryData(key, original)
+		const options = deletePVCMutationOptions(queryClient, createFakeViewerAPI())
+		const input = { namespace: 'default', name: 'mysql-data' }
+
+		const context = await options.onMutate?.(input, mutationContext)
+
+		expect(queryClient.getQueryData<typeof original>(key)).toEqual([])
+
+		options.onError?.(new Error('failed'), input, context, mutationContext)
+
+		expect(queryClient.getQueryData(key)).toEqual(original)
+	})
+
+	it('optimistically expands PVCs and rolls back on error', async () => {
+		const queryClient = new QueryClient()
+		const key = viewerKeys.pvcs('default')
+		const original = [pvcFixture({ name: 'mysql-data', capacity: '10Gi' })]
+		queryClient.setQueryData(key, original)
+		const options = expandPVCMutationOptions(queryClient, createFakeViewerAPI())
+		const input = {
+			namespace: 'default',
+			name: 'mysql-data',
+			capacity: '20Gi',
+			capacityBytes: 20 * 1024 * 1024 * 1024,
+		}
+
+		const context = await options.onMutate?.(input, mutationContext)
+
+		expect(queryClient.getQueryData<typeof original>(key)?.[0]?.capacity).toBe('20Gi')
+
+		options.onError?.(new Error('failed'), input, context, mutationContext)
+
+		expect(queryClient.getQueryData(key)).toEqual(original)
 	})
 })

@@ -6,7 +6,8 @@
 	"scripts": {
 		"dev": "vite",
 		"e2e": "playwright test",
-		"generate:api": "encore gen client --lang=typescript --output=src/services/encore/client.ts",
+		"generate:api": "encore gen client --lang=typescript --output=packages/encore-client/src/generated/client.ts",
+		"prepare": "pnpm generate:api",
 		"build": "tsc -b && vite build",
 		"check:css": "node scripts/check-modern-css.mjs",
 		"lint": "eslint .",
@@ -17,6 +18,8 @@
 	},
 	"dependencies": {
 		"@radix-ui/react-slot": "^1.2.4",
+		"@sealos-storage-manager/encore-client": "workspace:*",
+		"@sealos-storage-manager/filebrowser-client": "workspace:*",
 		"@tanstack/react-devtools": "^0.10.5",
 		"@tanstack/react-form": "^1.32.0",
 		"@tanstack/react-form-devtools": "^0.2.27",
@@ -31,10 +34,12 @@
 		"css-has-pseudo": "^8.0.0",
 		"i18next": "^26.1.0",
 		"lucide-react": "^1.14.0",
+		"next-themes": "^0.4.6",
 		"radix-ui": "^1.4.3",
 		"react": "^19.2.6",
 		"react-dom": "^19.2.6",
 		"react-i18next": "^17.0.7",
+		"sonner": "^2.0.7",
 		"tailwind-merge": "^3.6.0"
 	},
 	"devDependencies": {
@@ -67,10 +72,5 @@
 		"typescript-eslint": "^8.59.2",
 		"vite": "^8.0.12",
 		"vitest": "^4.1.6"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"core-js"
-		]
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/session"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -26,6 +27,10 @@ var kubernetesClientsetForConfig = func(c *rest.Config) (kubernetes.Interface, e
 
 type viewerService interface {
 	ListPVCs(ctx context.Context, namespace string) ([]domain.PVC, error)
+	CreatePVC(ctx context.Context, input session.CreatePVCInput) (*domain.PVC, error)
+	DeletePVC(ctx context.Context, input session.DeletePVCInput) (*domain.PVC, error)
+	ExpandPVC(ctx context.Context, input session.ExpandPVCInput) (*domain.PVC, error)
+	ListStorageClasses(ctx context.Context) ([]domain.StorageClass, error)
 	CreateViewerSession(ctx context.Context, input session.CreateViewerSessionInput) (*domain.ViewerSession, error)
 	GetViewerSession(ctx context.Context, id string, userID string) (*domain.ViewerSession, error)
 	IssueToken(ctx context.Context, id string, userID string) (*domain.ViewerToken, error)
@@ -45,6 +50,10 @@ type authService interface {
 type authorizer interface {
 	CanListPVCs(ctx context.Context, principal *authn.Principal, namespace string) error
 	CanGetPVC(ctx context.Context, principal *authn.Principal, namespace string, name string) error
+	CanCreatePVC(ctx context.Context, principal *authn.Principal, namespace string) error
+	CanDeletePVC(ctx context.Context, principal *authn.Principal, namespace string, name string) error
+	CanUpdatePVC(ctx context.Context, principal *authn.Principal, namespace string, name string) error
+	CanListStorageClasses(ctx context.Context, principal *authn.Principal) error
 }
 
 type Handler struct {
@@ -62,6 +71,22 @@ type AuthenticatedRequest struct {
 type ListPVCsRequest struct {
 	Authorization string `header:"Authorization" encore:"sensitive"`
 	Namespace     string `query:"namespace"`
+}
+
+type CreatePVCRequest struct {
+	Authorization    string   `header:"Authorization" encore:"sensitive"`
+	Namespace        string   `json:"namespace"`
+	Name             string   `json:"name"`
+	Capacity         string   `json:"capacity"`
+	CapacityBytes    int64    `json:"capacity_bytes"`
+	AccessModes      []string `json:"access_modes"`
+	StorageClassName string   `json:"storage_class_name"`
+}
+
+type ExpandPVCRequest struct {
+	Authorization string `header:"Authorization" encore:"sensitive"`
+	Capacity      string `json:"capacity"`
+	CapacityBytes int64  `json:"capacity_bytes"`
 }
 
 type CreateViewerSessionRequest struct {
@@ -85,6 +110,18 @@ type PVCList struct {
 
 type ListPVCsResponse struct {
 	PVCList PVCList `json:"pvc_list"`
+}
+
+type PVCResponse struct {
+	PVC *domain.PVC `json:"pvc"`
+}
+
+type StorageClassList struct {
+	Items []domain.StorageClass `json:"items"`
+}
+
+type ListStorageClassesResponse struct {
+	StorageClassList StorageClassList `json:"storage_class_list"`
 }
 
 type ViewerSessionResponse struct {
@@ -137,6 +174,39 @@ func NewHandler(
 
 func (h *Handler) ListPVCsData(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, error) {
 	response, apiErr := h.listPVCs(ctx, req)
+	return response, toEncoreError(apiErr)
+}
+
+func (h *Handler) CreatePVCData(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, error) {
+	response, apiErr := h.createPVC(ctx, req)
+	return response, toEncoreError(apiErr)
+}
+
+func (h *Handler) DeletePVCData(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *AuthenticatedRequest,
+) (*PVCResponse, error) {
+	response, apiErr := h.deletePVC(ctx, namespace, name, req)
+	return response, toEncoreError(apiErr)
+}
+
+func (h *Handler) ExpandPVCData(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *ExpandPVCRequest,
+) (*PVCResponse, error) {
+	response, apiErr := h.expandPVC(ctx, namespace, name, req)
+	return response, toEncoreError(apiErr)
+}
+
+func (h *Handler) ListStorageClassesData(
+	ctx context.Context,
+	req *AuthenticatedRequest,
+) (*ListStorageClassesResponse, error) {
+	response, apiErr := h.listStorageClasses(ctx, req)
 	return response, toEncoreError(apiErr)
 }
 
@@ -226,6 +296,40 @@ func (h *Handler) CreateViewerSession(w http.ResponseWriter, req *http.Request) 
 	}
 	body.Authorization = req.Header.Get("Authorization")
 	response, err := h.createViewerSession(req.Context(), &body)
+	writeHTTPResponse(w, response, err)
+}
+
+func (h *Handler) CreatePVC(w http.ResponseWriter, req *http.Request) {
+	var body CreatePVCRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeHTTPResponse(w, nil, apienv.NewError(400, apienv.CodeValidationError, "Invalid JSON request", nil))
+		return
+	}
+	body.Authorization = req.Header.Get("Authorization")
+	response, err := h.createPVC(req.Context(), &body)
+	writeHTTPResponse(w, response, err)
+}
+
+func (h *Handler) DeletePVC(w http.ResponseWriter, req *http.Request) {
+	namespace, name := pvcPathParams(req.URL.Path)
+	response, err := h.deletePVC(req.Context(), namespace, name, authenticatedRequest(req))
+	writeHTTPResponse(w, response, err)
+}
+
+func (h *Handler) ExpandPVC(w http.ResponseWriter, req *http.Request) {
+	var body ExpandPVCRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeHTTPResponse(w, nil, apienv.NewError(400, apienv.CodeValidationError, "Invalid JSON request", nil))
+		return
+	}
+	body.Authorization = req.Header.Get("Authorization")
+	namespace, name := expandPVCPathParams(req.URL.Path)
+	response, err := h.expandPVC(req.Context(), namespace, name, &body)
+	writeHTTPResponse(w, response, err)
+}
+
+func (h *Handler) ListStorageClasses(w http.ResponseWriter, req *http.Request) {
+	response, err := h.listStorageClasses(req.Context(), authenticatedRequest(req))
 	writeHTTPResponse(w, response, err)
 }
 
@@ -320,6 +424,139 @@ func (h *Handler) listPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCs
 	}
 	h.observe(ctx, http.MethodGet, "/api/pvcs", http.StatusOK, start)
 	return &ListPVCsResponse{PVCList: PVCList{Items: items}}, nil
+}
+
+func (h *Handler) createPVC(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, *apienv.Error) {
+	start := time.Now()
+	principal, err := authenticateRequest(req)
+	if err != nil {
+		h.observe(ctx, http.MethodPost, "/api/pvcs", err.Status, start)
+		return nil, err
+	}
+	ctx = authn.WithPrincipal(ctx, principal)
+	namespace := req.Namespace
+	if namespace == "" {
+		namespace = principal.Namespace
+	}
+	if err := h.authz.CanCreatePVC(ctx, principal, namespace); err != nil {
+		apiErr := apienv.NewError(403, apienv.CodePVCCreateForbidden, "PVC create access denied", nil)
+		h.observe(ctx, http.MethodPost, "/api/pvcs", apiErr.Status, start)
+		return nil, apiErr
+	}
+	pvc, createErr := h.viewers.CreatePVC(ctx, session.CreatePVCInput{
+		Namespace:        namespace,
+		Name:             req.Name,
+		Capacity:         req.Capacity,
+		CapacityBytes:    req.CapacityBytes,
+		AccessModes:      req.AccessModes,
+		StorageClassName: req.StorageClassName,
+	})
+	if createErr != nil {
+		apiErr := apienv.FromError(createErr)
+		h.observe(ctx, http.MethodPost, "/api/pvcs", apiErr.Status, start)
+		return nil, apiErr
+	}
+	h.observe(ctx, http.MethodPost, "/api/pvcs", http.StatusCreated, start)
+	return &PVCResponse{PVC: pvc}, nil
+}
+
+func (h *Handler) deletePVC(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *AuthenticatedRequest,
+) (*PVCResponse, *apienv.Error) {
+	start := time.Now()
+	principal, err := authenticateRequest(req)
+	if err != nil {
+		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", err.Status, start)
+		return nil, err
+	}
+	ctx = authn.WithPrincipal(ctx, principal)
+	if namespace == "" {
+		namespace = principal.Namespace
+	}
+	if err := h.authz.CanDeletePVC(ctx, principal, namespace, name); err != nil {
+		apiErr := apienv.NewError(403, apienv.CodePVCDeleteForbidden, "PVC delete access denied", nil)
+		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", apiErr.Status, start)
+		return nil, apiErr
+	}
+	pvc, deleteErr := h.viewers.DeletePVC(ctx, session.DeletePVCInput{
+		Namespace: namespace,
+		Name:      name,
+	})
+	if deleteErr != nil {
+		apiErr := apienv.FromError(deleteErr)
+		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", apiErr.Status, start)
+		return nil, apiErr
+	}
+	h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", http.StatusOK, start)
+	return &PVCResponse{PVC: pvc}, nil
+}
+
+func (h *Handler) expandPVC(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *ExpandPVCRequest,
+) (*PVCResponse, *apienv.Error) {
+	start := time.Now()
+	principal, err := authenticateRequest(req)
+	if err != nil {
+		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", err.Status, start)
+		return nil, err
+	}
+	ctx = authn.WithPrincipal(ctx, principal)
+	if namespace == "" {
+		namespace = principal.Namespace
+	}
+	if err := h.authz.CanUpdatePVC(ctx, principal, namespace, name); err != nil {
+		apiErr := apienv.NewError(403, apienv.CodePVCExpandForbidden, "PVC expand access denied", nil)
+		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", apiErr.Status, start)
+		return nil, apiErr
+	}
+	pvc, expandErr := h.viewers.ExpandPVC(ctx, session.ExpandPVCInput{
+		Namespace:     namespace,
+		Name:          name,
+		Capacity:      req.Capacity,
+		CapacityBytes: req.CapacityBytes,
+	})
+	if expandErr != nil {
+		apiErr := apienv.FromError(expandErr)
+		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", apiErr.Status, start)
+		return nil, apiErr
+	}
+	h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", http.StatusOK, start)
+	return &PVCResponse{PVC: pvc}, nil
+}
+
+func (h *Handler) listStorageClasses(
+	ctx context.Context,
+	req *AuthenticatedRequest,
+) (*ListStorageClassesResponse, *apienv.Error) {
+	start := time.Now()
+	principal, err := authenticateRequest(req)
+	if err != nil {
+		h.observe(ctx, http.MethodGet, "/api/storage-classes", err.Status, start)
+		return nil, err
+	}
+	ctx = authn.WithPrincipal(ctx, principal)
+	if err := h.authz.CanListStorageClasses(ctx, principal); err != nil {
+		apiErr := apienv.NewError(403, apienv.CodePVCAccessDenied, "Storage class access denied", nil)
+		h.observe(ctx, http.MethodGet, "/api/storage-classes", apiErr.Status, start)
+		return nil, apiErr
+	}
+	items, listErr := h.viewers.ListStorageClasses(ctx)
+	if listErr != nil {
+		apiErr := apienv.FromError(listErr)
+		h.observe(ctx, http.MethodGet, "/api/storage-classes", apiErr.Status, start)
+		return nil, apiErr
+	}
+	if items == nil {
+		items = []domain.StorageClass{}
+	}
+	h.observe(ctx, http.MethodGet, "/api/storage-classes", http.StatusOK, start)
+	return &ListStorageClassesResponse{StorageClassList: StorageClassList{Items: items}}, nil
 }
 
 func (h *Handler) createViewerSession(
@@ -584,6 +821,20 @@ func (req *ListPVCsRequest) authorizationHeader() string {
 	return req.Authorization
 }
 
+func (req *CreatePVCRequest) authorizationHeader() string {
+	if req == nil {
+		return ""
+	}
+	return req.Authorization
+}
+
+func (req *ExpandPVCRequest) authorizationHeader() string {
+	if req == nil {
+		return ""
+	}
+	return req.Authorization
+}
+
 func (req *CreateViewerSessionRequest) authorizationHeader() string {
 	if req == nil {
 		return ""
@@ -614,6 +865,9 @@ func writeHTTPResponse(w http.ResponseWriter, response any, apiErr *apienv.Error
 }
 
 func httpStatus(response any) int {
+	if _, ok := response.(*PVCResponse); ok {
+		return http.StatusOK
+	}
 	return 0
 }
 
@@ -691,6 +945,24 @@ func (h *Handler) authorizePodSessionPVC(
 
 func pathID(path string, prefix string) string {
 	return strings.Trim(strings.TrimPrefix(path, prefix), "/")
+}
+
+func pvcPathParams(path string) (string, string) {
+	remainder := strings.Trim(strings.TrimPrefix(path, "/api/pvcs/"), "/")
+	parts := strings.SplitN(remainder, "/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
+}
+
+func expandPVCPathParams(path string) (string, string) {
+	remainder := strings.TrimSuffix(strings.Trim(strings.TrimPrefix(path, "/api/pvcs/"), "/"), "/expand")
+	parts := strings.SplitN(remainder, "/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }
 
 var errRuntimeUnavailable = errors.New("viewer runtime is not configured")
@@ -792,6 +1064,100 @@ func (a kubernetesAuthorizer) CanGetPVC(
 	return nil
 }
 
+func (a kubernetesAuthorizer) CanCreatePVC(
+	ctx context.Context,
+	principal *authn.Principal,
+	namespace string,
+) (err error) {
+	ctx, finish := a.recorder.TraceOperation(ctx,
+		"kubernetes.authorize.create_pvc",
+		slog.String("namespace", namespace),
+		slog.Bool("management_client", a.management != nil),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	clientset, err := kubernetesClientsetForConfig(principal.ClientConfig)
+	if err != nil {
+		return err
+	}
+	if a.management != nil {
+		if err := a.sameNamespace(ctx, clientset, namespace); err != nil {
+			return err
+		}
+	}
+	return a.canUseResource(ctx, clientset, "create", "", "persistentvolumeclaims", namespace, "")
+}
+
+func (a kubernetesAuthorizer) CanDeletePVC(
+	ctx context.Context,
+	principal *authn.Principal,
+	namespace string,
+	name string,
+) (err error) {
+	ctx, finish := a.recorder.TraceOperation(ctx,
+		"kubernetes.authorize.delete_pvc",
+		slog.String("namespace", namespace),
+		slog.String("pvc_name", name),
+		slog.Bool("management_client", a.management != nil),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	if err := a.CanGetPVC(ctx, principal, namespace, name); err != nil {
+		return err
+	}
+	clientset, err := kubernetesClientsetForConfig(principal.ClientConfig)
+	if err != nil {
+		return err
+	}
+	return a.canUseResource(ctx, clientset, "delete", "", "persistentvolumeclaims", namespace, name)
+}
+
+func (a kubernetesAuthorizer) CanUpdatePVC(
+	ctx context.Context,
+	principal *authn.Principal,
+	namespace string,
+	name string,
+) (err error) {
+	ctx, finish := a.recorder.TraceOperation(ctx,
+		"kubernetes.authorize.update_pvc",
+		slog.String("namespace", namespace),
+		slog.String("pvc_name", name),
+		slog.Bool("management_client", a.management != nil),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	if err := a.CanGetPVC(ctx, principal, namespace, name); err != nil {
+		return err
+	}
+	clientset, err := kubernetesClientsetForConfig(principal.ClientConfig)
+	if err != nil {
+		return err
+	}
+	return a.canUseResource(ctx, clientset, "update", "", "persistentvolumeclaims", namespace, name)
+}
+
+func (a kubernetesAuthorizer) CanListStorageClasses(
+	ctx context.Context,
+	principal *authn.Principal,
+) (err error) {
+	ctx, finish := a.recorder.TraceOperation(ctx, "kubernetes.authorize.list_storageclasses")
+	defer func() {
+		finish(err)
+	}()
+
+	clientset, err := kubernetesClientsetForConfig(principal.ClientConfig)
+	if err != nil {
+		return err
+	}
+	return a.canUseResource(ctx, clientset, "list", "storage.k8s.io", "storageclasses", "", "")
+}
+
 func (a kubernetesAuthorizer) sameNamespace(
 	ctx context.Context,
 	userClient kubernetes.Interface,
@@ -850,4 +1216,39 @@ func (a kubernetesAuthorizer) observeKubernetes(
 		finish(err)
 	}()
 	return call(ctx)
+}
+
+func (a kubernetesAuthorizer) canUseResource(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	verb string,
+	group string,
+	resource string,
+	namespace string,
+	name string,
+) error {
+	return a.observeKubernetes(ctx, verb, resource, namespace, name, func(ctx context.Context) error {
+		review, err := clientset.AuthorizationV1().SelfSubjectAccessReviews().Create(
+			ctx,
+			&authorizationv1.SelfSubjectAccessReview{
+				Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+					ResourceAttributes: &authorizationv1.ResourceAttributes{
+						Group:     group,
+						Verb:      verb,
+						Resource:  resource,
+						Namespace: namespace,
+						Name:      name,
+					},
+				},
+			},
+			metav1.CreateOptions{},
+		)
+		if err != nil {
+			return err
+		}
+		if !review.Status.Allowed {
+			return errors.New("self subject access review denied")
+		}
+		return nil
+	})
 }

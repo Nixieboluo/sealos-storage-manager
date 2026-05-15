@@ -19,6 +19,7 @@ import { pvcIdentity } from '@/features/viewer/utils/viewer-status'
 interface ViewerLaunchPanelProps {
 	api?: ViewerAPI
 	autoStartKey?: string | null
+	onSessionStatusChange?: (status: string) => void
 	pvc: PVC | null
 	setToken: (token: ViewerToken | null) => void
 }
@@ -26,6 +27,7 @@ interface ViewerLaunchPanelProps {
 export function ViewerLaunchPanel({
 	api = viewerApi,
 	autoStartKey,
+	onSessionStatusChange,
 	pvc,
 	setToken,
 }: ViewerLaunchPanelProps) {
@@ -54,6 +56,10 @@ export function ViewerLaunchPanel({
 	useEffect(() => {
 		setToken(flow.token)
 	}, [flow.token, setToken])
+
+	useEffect(() => {
+		onSessionStatusChange?.(flow.status)
+	}, [flow.status, onSessionStatusChange])
 
 	useEffect(() => {
 		if (!pvc || !autoStartKey) {

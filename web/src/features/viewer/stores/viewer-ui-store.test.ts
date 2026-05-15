@@ -25,7 +25,7 @@ describe('viewerUIStore', () => {
 				pvcName: 'mysql-data',
 				uid: 'uid-1',
 			},
-			view: 'viewer',
+			view: 'files',
 		})
 
 		viewerUIStore.actions.reset()

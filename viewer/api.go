@@ -16,6 +16,36 @@ func ListPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, err
 	return runtimeHandler().ListPVCsData(ctx, req)
 }
 
+//encore:api public method=POST path=/api/pvcs
+func CreatePVC(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, error) {
+	return runtimeHandler().CreatePVCData(ctx, req)
+}
+
+//encore:api public method=DELETE path=/api/pvcs/:namespace/:name
+func DeletePVC(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *AuthenticatedRequest,
+) (*PVCResponse, error) {
+	return runtimeHandler().DeletePVCData(ctx, namespace, name, req)
+}
+
+//encore:api public method=POST path=/api/pvcs/:namespace/:name/expand
+func ExpandPVC(
+	ctx context.Context,
+	namespace string,
+	name string,
+	req *ExpandPVCRequest,
+) (*PVCResponse, error) {
+	return runtimeHandler().ExpandPVCData(ctx, namespace, name, req)
+}
+
+//encore:api public method=GET path=/api/storage-classes
+func ListStorageClasses(ctx context.Context, req *AuthenticatedRequest) (*ListStorageClassesResponse, error) {
+	return runtimeHandler().ListStorageClassesData(ctx, req)
+}
+
 //encore:api public method=POST path=/api/viewer-sessions
 func CreateViewerSession(
 	ctx context.Context,
@@ -97,6 +127,22 @@ func (unavailableViewerService) ListPVCs(_ context.Context, _ string) ([]domain.
 	return nil, errRuntimeUnavailable
 }
 
+func (unavailableViewerService) CreatePVC(_ context.Context, _ session.CreatePVCInput) (*domain.PVC, error) {
+	return nil, errRuntimeUnavailable
+}
+
+func (unavailableViewerService) DeletePVC(_ context.Context, _ session.DeletePVCInput) (*domain.PVC, error) {
+	return nil, errRuntimeUnavailable
+}
+
+func (unavailableViewerService) ExpandPVC(_ context.Context, _ session.ExpandPVCInput) (*domain.PVC, error) {
+	return nil, errRuntimeUnavailable
+}
+
+func (unavailableViewerService) ListStorageClasses(_ context.Context) ([]domain.StorageClass, error) {
+	return nil, errRuntimeUnavailable
+}
+
 func (unavailableViewerService) CreateViewerSession(
 	_ context.Context,
 	_ session.CreateViewerSessionInput,
@@ -156,5 +202,31 @@ func (denyAuthorizer) CanGetPVC(
 	_ string,
 	_ string,
 ) error {
+	return errRuntimeUnavailable
+}
+
+func (denyAuthorizer) CanCreatePVC(_ context.Context, _ *authn.Principal, _ string) error {
+	return errRuntimeUnavailable
+}
+
+func (denyAuthorizer) CanDeletePVC(
+	_ context.Context,
+	_ *authn.Principal,
+	_ string,
+	_ string,
+) error {
+	return errRuntimeUnavailable
+}
+
+func (denyAuthorizer) CanUpdatePVC(
+	_ context.Context,
+	_ *authn.Principal,
+	_ string,
+	_ string,
+) error {
+	return errRuntimeUnavailable
+}
+
+func (denyAuthorizer) CanListStorageClasses(_ context.Context, _ *authn.Principal) error {
 	return errRuntimeUnavailable
 }

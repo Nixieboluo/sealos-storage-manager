@@ -15,7 +15,7 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'pnpm preview --host 127.0.0.1 --port 4173',
+		command: 'pnpm vite --host 127.0.0.1 --port 4173',
 		reuseExistingServer: true,
 		timeout: 120_000,
 		url: 'http://127.0.0.1:4173',

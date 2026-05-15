@@ -1,14 +1,22 @@
 import type { TFunction } from 'i18next'
 import type { ViewerApiErrorShape, ViewerErrorCode } from '@/features/viewer/types/viewer'
 
-import { isAPIError } from '@/services/encore/client'
+import { isAPIError } from '@sealos-storage-manager/encore-client'
 
 export const viewerErrorMessageKeys = {
 	PVC_NOT_FOUND: 'errors.pvcNotFound',
+	PVC_ALREADY_EXISTS: 'errors.pvcAlreadyExists',
+	PVC_IN_USE: 'errors.pvcInUse',
 	PVC_ACCESS_DENIED: 'errors.pvcAccessDenied',
+	PVC_CREATE_FORBIDDEN: 'errors.pvcCreateForbidden',
+	PVC_DELETE_FORBIDDEN: 'errors.pvcDeleteForbidden',
+	PVC_EXPAND_FORBIDDEN: 'errors.pvcExpandForbidden',
+	PVC_EXPAND_UNSUPPORTED: 'errors.pvcExpandUnsupported',
+	PVC_EXPAND_NOT_INCREASED: 'errors.pvcExpandNotIncreased',
 	UNSUPPORTED_ACCESS_MODE: 'errors.unsupportedAccessMode',
 	PVC_MOUNT_CONFLICT: 'errors.pvcMountConflict',
 	PVC_MOUNT_PENDING: 'errors.pvcMountPending',
+	STORAGE_CLASS_NOT_FOUND: 'errors.storageClassNotFound',
 	VIEWER_POD_CREATING: 'errors.viewerPodCreating',
 	VIEWER_POD_FAILED: 'errors.viewerPodFailed',
 	VIEWER_SESSION_NOT_FOUND: 'errors.viewerSessionNotFound',

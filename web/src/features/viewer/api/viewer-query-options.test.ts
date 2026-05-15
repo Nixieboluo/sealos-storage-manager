@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createViewerSessionMutationOptions, heartbeatViewerSessionMutationOptions } from '@/features/viewer/api/viewer-mutations'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
-import { pvcListQueryOptions, viewerSessionQueryOptions } from '@/features/viewer/api/viewer-query-options'
+import { pvcListQueryOptions, storageClassListQueryOptions, viewerSessionQueryOptions } from '@/features/viewer/api/viewer-query-options'
 import { createFakeViewerAPI } from '@/features/viewer/test/fakes'
 
 const mutationContext = {
@@ -17,6 +17,19 @@ describe('viewer query options', () => {
 		const options = pvcListQueryOptions('default', api)
 
 		expect(options.queryKey).toEqual(viewerKeys.pvcs('default'))
+		await expect(options.queryFn?.({
+			client: mutationContext.client,
+			meta: undefined,
+			queryKey: options.queryKey,
+			signal: new AbortController().signal,
+		})).resolves.toHaveLength(1)
+	})
+
+	it('uses a stable storage class query key', async () => {
+		const api = createFakeViewerAPI()
+		const options = storageClassListQueryOptions(api)
+
+		expect(options.queryKey).toEqual(viewerKeys.storageClasses())
 		await expect(options.queryFn?.({
 			client: mutationContext.client,
 			meta: undefined,

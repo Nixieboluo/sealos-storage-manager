@@ -1,0 +1,21 @@
+{
+	"name": "@sealos-storage-manager/filebrowser-client",
+	"type": "module",
+	"version": "0.0.0",
+	"private": true,
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json --noEmit",
+		"test": "vitest run --config vitest.config.ts"
+	},
+	"dependencies": {
+		"tus-js-client": "^4.3.1"
+	},
+	"devDependencies": {
+		"@types/node": "^25.7.0",
+		"typescript": "~6.0.2",
+		"vitest": "^4.1.6"
+	}
+}

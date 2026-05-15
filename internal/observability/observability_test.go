@@ -239,7 +239,9 @@ func prometheusText(recorder *Recorder) string {
 }
 
 func TestMain(m *testing.M) {
-	os.Setenv("ENCORERUNTIME_NOPANIC", "1")
+	if err := os.Setenv("ENCORERUNTIME_NOPANIC", "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 

@@ -7,8 +7,16 @@ import (
 )
 
 const (
+	CodePVCAlreadyExists       = "PVC_ALREADY_EXISTS"
 	CodePVCNotFound            = "PVC_NOT_FOUND"
 	CodePVCAccessDenied        = "PVC_ACCESS_DENIED"
+	CodePVCInUse               = "PVC_IN_USE"
+	CodePVCCreateForbidden     = "PVC_CREATE_FORBIDDEN"
+	CodePVCDeleteForbidden     = "PVC_DELETE_FORBIDDEN"
+	CodePVCExpandForbidden     = "PVC_EXPAND_FORBIDDEN"
+	CodePVCExpandUnsupported   = "PVC_EXPAND_UNSUPPORTED"
+	CodePVCExpandNotIncreased  = "PVC_EXPAND_NOT_INCREASED"
+	CodeStorageClassNotFound   = "STORAGE_CLASS_NOT_FOUND"
 	CodeUnsupportedAccessMode  = "UNSUPPORTED_ACCESS_MODE"
 	CodePVCMountConflict       = "PVC_MOUNT_CONFLICT"
 	CodePVCMountPending        = "PVC_MOUNT_PENDING"

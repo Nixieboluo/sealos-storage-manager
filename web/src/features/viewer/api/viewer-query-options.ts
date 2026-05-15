@@ -19,6 +19,14 @@ export function pvcListQueryOptions(namespace: string, api: ViewerAPI = viewerAp
 	})
 }
 
+export function storageClassListQueryOptions(api: ViewerAPI = viewerApi) {
+	return queryOptions({
+		queryKey: viewerKeys.storageClasses(),
+		queryFn: () => api.listStorageClasses(),
+		staleTime: 60_000,
+	})
+}
+
 export function viewerSessionQueryOptions({
 	api = viewerApi,
 	enabled = true,

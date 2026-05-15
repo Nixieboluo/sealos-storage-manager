@@ -8,6 +8,8 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type observedClient struct {
@@ -44,6 +46,60 @@ func (c observedClient) ListPVCs(ctx context.Context, namespace string) ([]corev
 		return err
 	})
 	return pvcs, err
+}
+
+func (c observedClient) CreatePVC(
+	ctx context.Context,
+	pvc *corev1.PersistentVolumeClaim,
+) (*corev1.PersistentVolumeClaim, error) {
+	var created *corev1.PersistentVolumeClaim
+	err := c.observe(ctx, "create", "persistentvolumeclaim", pvc.Namespace, pvc.Name, func(ctx context.Context) error {
+		var err error
+		created, err = c.next.CreatePVC(ctx, pvc)
+		return err
+	})
+	return created, err
+}
+
+func (c observedClient) DeletePVC(ctx context.Context, namespace string, name string) error {
+	return c.observe(ctx, "delete", "persistentvolumeclaim", namespace, name, func(ctx context.Context) error {
+		return c.next.DeletePVC(ctx, namespace, name)
+	})
+}
+
+func (c observedClient) UpdatePVCStorageRequest(
+	ctx context.Context,
+	namespace string,
+	name string,
+	storage resource.Quantity,
+) (*corev1.PersistentVolumeClaim, error) {
+	var updated *corev1.PersistentVolumeClaim
+	err := c.observe(ctx, "update", "persistentvolumeclaim", namespace, name, func(ctx context.Context) error {
+		var err error
+		updated, err = c.next.UpdatePVCStorageRequest(ctx, namespace, name, storage)
+		return err
+	})
+	return updated, err
+}
+
+func (c observedClient) GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	var storageClass *storagev1.StorageClass
+	err := c.observe(ctx, "get", "storageclass", "", name, func(ctx context.Context) error {
+		var err error
+		storageClass, err = c.next.GetStorageClass(ctx, name)
+		return err
+	})
+	return storageClass, err
+}
+
+func (c observedClient) ListStorageClasses(ctx context.Context) ([]storagev1.StorageClass, error) {
+	var storageClasses []storagev1.StorageClass
+	err := c.observe(ctx, "list", "storageclasses", "", "", func(ctx context.Context) error {
+		var err error
+		storageClasses, err = c.next.ListStorageClasses(ctx)
+		return err
+	})
+	return storageClasses, err
 }
 
 func (c observedClient) ListPods(ctx context.Context, namespace string) ([]corev1.Pod, error) {

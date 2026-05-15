@@ -35,6 +35,26 @@ func TestObservedClientRecordsKubernetesRequest(t *testing.T) {
 	}
 }
 
+func TestObservedClientRecordsPVCMutation(t *testing.T) {
+	t.Setenv("ENCORERUNTIME_NOPANIC", "1")
+
+	recorder := observability.MustNew(testObservability(), nil)
+	client := WithObservability(New(fake.NewSimpleClientset()), recorder)
+
+	if _, err := client.CreatePVC(t.Context(), &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "data",
+		},
+	}); err != nil {
+		t.Fatalf("CreatePVC() error = %v", err)
+	}
+	metrics := prometheusText(t, recorder)
+	if !strings.Contains(metrics, `viewer_kubernetes_operation_requests_total{Operation="create",Resource="persistentvolumeclaim",Result="success"} 1`) {
+		t.Fatalf("missing pvc create metric: %s", metrics)
+	}
+}
+
 func TestObservedClientRecordsKubernetesError(t *testing.T) {
 	t.Setenv("ENCORERUNTIME_NOPANIC", "1")
 

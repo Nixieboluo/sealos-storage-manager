@@ -1,4 +1,4 @@
-import type { domain } from '@/services/encore/client'
+import type { domain } from '@sealos-storage-manager/encore-client'
 
 export type MountedPod = domain.MountedPod
 export type PVC = domain.PVC
@@ -7,6 +7,7 @@ export type ViewerScheduling = domain.ViewerScheduling
 export type ViewerSession = domain.ViewerSession
 export type ViewerToken = domain.ViewerToken
 export type Heartbeat = domain.Heartbeat
+export type StorageClass = domain.StorageClass
 
 export type ViewerMode = 'readonly' | 'readwrite' | string
 export type ViewerStatus = 'active' | 'ready' | 'creating' | 'closed' | 'expired' | 'failed' | string
@@ -21,10 +22,18 @@ export interface ViewerApiErrorShape {
 
 export const backendViewerErrorCodes = [
 	'PVC_NOT_FOUND',
+	'PVC_ALREADY_EXISTS',
+	'PVC_IN_USE',
 	'PVC_ACCESS_DENIED',
+	'PVC_CREATE_FORBIDDEN',
+	'PVC_DELETE_FORBIDDEN',
+	'PVC_EXPAND_FORBIDDEN',
+	'PVC_EXPAND_UNSUPPORTED',
+	'PVC_EXPAND_NOT_INCREASED',
 	'UNSUPPORTED_ACCESS_MODE',
 	'PVC_MOUNT_CONFLICT',
 	'PVC_MOUNT_PENDING',
+	'STORAGE_CLASS_NOT_FOUND',
 	'VIEWER_POD_CREATING',
 	'VIEWER_POD_FAILED',
 	'VIEWER_SESSION_NOT_FOUND',
@@ -45,6 +54,27 @@ export interface CreateViewerSessionInput {
 	pvcName: string
 }
 
+export interface CreatePVCInput {
+	accessModes: string[]
+	capacity: string
+	capacityBytes: number
+	name: string
+	namespace: string
+	storageClassName?: string
+}
+
+export interface DeletePVCInput {
+	name: string
+	namespace: string
+}
+
+export interface ExpandPVCInput {
+	capacity: string
+	capacityBytes: number
+	name: string
+	namespace: string
+}
+
 export interface ListPVCsInput {
 	namespace: string
 }
@@ -52,12 +82,16 @@ export interface ListPVCsInput {
 export interface ViewerAPI {
 	closePodSession: (podSessionID: string) => Promise<PodSession>
 	closeViewerSession: (viewerSessionID: string) => Promise<ViewerSession>
+	createPVC: (input: CreatePVCInput) => Promise<PVC>
 	createViewerSession: (input: CreateViewerSessionInput) => Promise<ViewerSession>
+	deletePVC: (input: DeletePVCInput) => Promise<PVC>
+	expandPVC: (input: ExpandPVCInput) => Promise<PVC>
 	getPodSession: (podSessionID: string) => Promise<PodSession>
 	getViewerSession: (viewerSessionID: string) => Promise<ViewerSession>
 	heartbeatViewerSession: (viewerSessionID: string) => Promise<Heartbeat>
 	issueViewerToken: (viewerSessionID: string) => Promise<ViewerToken>
 	listPVCs: (input: ListPVCsInput) => Promise<PVC[]>
+	listStorageClasses: () => Promise<StorageClass[]>
 }
 
 export interface ViewerSelection {

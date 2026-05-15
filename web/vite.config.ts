@@ -11,6 +11,8 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			'@': path.resolve(__dirname, './src'),
+			'@sealos-storage-manager/encore-client': path.resolve(__dirname, './packages/encore-client/src'),
+			'@sealos-storage-manager/filebrowser-client': path.resolve(__dirname, './packages/filebrowser-client/src'),
 		},
 	},
 	build: {

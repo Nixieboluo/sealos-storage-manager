@@ -3,7 +3,7 @@ import type { ViewerSelection } from '@/features/viewer/types/viewer'
 import { useSelector } from '@tanstack/react-store'
 import { createStore } from '@tanstack/store'
 
-export type ViewerView = 'volumes' | 'viewer' | 'sessions'
+export type ViewerView = 'volumes' | 'files' | 'trash'
 export type Locale = 'en' | 'zh'
 
 export interface ViewerUIState {
@@ -32,7 +32,7 @@ export const viewerUIStore = createStore(initialViewerUIState, store => ({
 		store.setState(state => ({
 			...state,
 			selectedPVC,
-			view: 'viewer',
+			view: 'files',
 		})),
 	setActiveSession: (activeViewerSessionID: string | null, activePodSessionID: string | null) =>
 		store.setState(state => ({

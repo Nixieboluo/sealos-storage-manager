@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
@@ -12,6 +13,11 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 type ViewerService struct {
@@ -28,6 +34,27 @@ type CreateViewerSessionInput struct {
 	Namespace string
 	PVCName   string
 	UserID    string
+}
+
+type CreatePVCInput struct {
+	Namespace        string
+	Name             string
+	Capacity         string
+	CapacityBytes    int64
+	AccessModes      []string
+	StorageClassName string
+}
+
+type DeletePVCInput struct {
+	Namespace string
+	Name      string
+}
+
+type ExpandPVCInput struct {
+	Namespace     string
+	Name          string
+	Capacity      string
+	CapacityBytes int64
 }
 
 func NewViewerService(
@@ -92,6 +119,180 @@ func (s *ViewerService) ListPVCs(ctx context.Context, namespace string) (items [
 		slog.String("namespace", namespace),
 		slog.Int("pvc_count", len(items)),
 	)
+	return items, nil
+}
+
+func (s *ViewerService) CreatePVC(ctx context.Context, input CreatePVCInput) (pvc *domain.PVC, err error) {
+	ctx, finish := s.recorder.TraceOperation(ctx,
+		"pvc.create",
+		slog.String("namespace", input.Namespace),
+		slog.String("pvc_name", input.Name),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	if !s.namespaceAllowed(input.Namespace) {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
+	}
+	storage, err := capacityQuantity(input.Capacity, input.CapacityBytes)
+	if err != nil {
+		return nil, apienv.NewError(400, apienv.CodeValidationError, err.Error(), nil)
+	}
+	accessModes, err := persistentVolumeAccessModes(input.AccessModes)
+	if err != nil {
+		return nil, apienv.NewError(400, apienv.CodeUnsupportedAccessMode, err.Error(), nil)
+	}
+	if errs := validation.IsDNS1123Label(input.Name); len(errs) > 0 {
+		return nil, apienv.NewError(400, apienv.CodeValidationError, "PVC name must be a DNS-1123 label", map[string]any{
+			"violations": errs,
+		})
+	}
+	pvcSpec := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: input.Namespace,
+			Name:      input.Name,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "sealos-storage-manager",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: accessModes,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: storage},
+			},
+		},
+	}
+	if strings.TrimSpace(input.StorageClassName) != "" {
+		storageClassName := strings.TrimSpace(input.StorageClassName)
+		if _, err := s.kube.GetStorageClass(ctx, storageClassName); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, apienv.NewError(404, apienv.CodeStorageClassNotFound, "StorageClass not found", nil)
+			}
+			return nil, err
+		}
+		pvcSpec.Spec.StorageClassName = &storageClassName
+	}
+	created, err := s.kube.CreatePVC(ctx, pvcSpec)
+	if err != nil {
+		if errors.IsAlreadyExists(err) {
+			return nil, apienv.NewError(409, apienv.CodePVCAlreadyExists, "PVC already exists", nil)
+		}
+		return nil, err
+	}
+	return s.pvcToDomain(ctx, created)
+}
+
+func (s *ViewerService) DeletePVC(ctx context.Context, input DeletePVCInput) (pvc *domain.PVC, err error) {
+	ctx, finish := s.recorder.TraceOperation(ctx,
+		"pvc.delete",
+		slog.String("namespace", input.Namespace),
+		slog.String("pvc_name", input.Name),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	if !s.namespaceAllowed(input.Namespace) {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
+	}
+	current, err := s.kube.GetPVC(ctx, input.Namespace, input.Name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		}
+		return nil, err
+	}
+	mountInfo, err := s.detectPVCMounts(ctx, input.Namespace, input.Name)
+	if err != nil {
+		return nil, err
+	}
+	if mountInfo.Mounted {
+		return nil, apienv.NewError(409, apienv.CodePVCInUse, "PVC is still mounted", map[string]any{
+			"mounted_pods": mountInfo.MountedPods,
+		})
+	}
+	deleted, err := s.pvcToDomain(ctx, current)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.kube.DeletePVC(ctx, input.Namespace, input.Name); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		}
+		return nil, err
+	}
+	return deleted, nil
+}
+
+func (s *ViewerService) ExpandPVC(ctx context.Context, input ExpandPVCInput) (pvc *domain.PVC, err error) {
+	ctx, finish := s.recorder.TraceOperation(ctx,
+		"pvc.expand",
+		slog.String("namespace", input.Namespace),
+		slog.String("pvc_name", input.Name),
+	)
+	defer func() {
+		finish(err)
+	}()
+
+	if !s.namespaceAllowed(input.Namespace) {
+		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
+	}
+	target, err := capacityQuantity(input.Capacity, input.CapacityBytes)
+	if err != nil {
+		return nil, apienv.NewError(400, apienv.CodeValidationError, err.Error(), nil)
+	}
+	current, err := s.kube.GetPVC(ctx, input.Namespace, input.Name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		}
+		return nil, err
+	}
+	currentStorage := current.Spec.Resources.Requests.Storage()
+	if currentStorage == nil || currentStorage.IsZero() {
+		return nil, apienv.NewError(400, apienv.CodePVCExpandUnsupported, "PVC storage request is missing", nil)
+	}
+	if target.Cmp(*currentStorage) <= 0 {
+		return nil, apienv.NewError(400, apienv.CodePVCExpandNotIncreased, "Target capacity must be greater than current capacity", nil)
+	}
+	updated, err := s.kube.UpdatePVCStorageRequest(ctx, input.Namespace, input.Name, target)
+	if err != nil {
+		return nil, err
+	}
+	return s.pvcToDomain(ctx, updated)
+}
+
+func (s *ViewerService) ListStorageClasses(ctx context.Context) (items []domain.StorageClass, err error) {
+	ctx, finish := s.recorder.TraceOperation(ctx, "storageclass.list")
+	defer func() {
+		finish(err)
+	}()
+
+	storageClasses, err := s.kube.ListStorageClasses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items = make([]domain.StorageClass, 0, len(storageClasses))
+	for _, storageClass := range storageClasses {
+		volumeBindingMode := ""
+		if storageClass.VolumeBindingMode != nil {
+			volumeBindingMode = string(*storageClass.VolumeBindingMode)
+		}
+		reclaimPolicy := ""
+		if storageClass.ReclaimPolicy != nil {
+			reclaimPolicy = string(*storageClass.ReclaimPolicy)
+		}
+		items = append(items, domain.StorageClass{
+			Name:                     storageClass.Name,
+			Provisioner:              storageClass.Provisioner,
+			AllowVolumeExpansion:     storageClass.AllowVolumeExpansion != nil && *storageClass.AllowVolumeExpansion,
+			VolumeBindingMode:        volumeBindingMode,
+			IsDefault:                storageClass.Annotations["storageclass.kubernetes.io/is-default-class"] == "true",
+			ReclaimPolicy:            reclaimPolicy,
+			CreationTimestampRFC3339: storageClass.CreationTimestamp.Format(time.RFC3339),
+		})
+	}
 	return items, nil
 }
 
@@ -341,6 +542,35 @@ func (s *ViewerService) detectPVCMounts(
 	return mountInfo, nil
 }
 
+func (s *ViewerService) pvcToDomain(
+	ctx context.Context,
+	pvc *corev1.PersistentVolumeClaim,
+) (*domain.PVC, error) {
+	accessModes := make([]string, 0, len(pvc.Spec.AccessModes))
+	for _, mode := range pvc.Spec.AccessModes {
+		accessModes = append(accessModes, string(mode))
+	}
+	mountInfo, err := s.detectPVCMounts(ctx, pvc.Namespace, pvc.Name)
+	if err != nil {
+		return nil, err
+	}
+	supported, viewerMode, reason := kube.ViewerSupportForAccessModes(accessModes)
+	return &domain.PVC{
+		Namespace:        pvc.Namespace,
+		Name:             pvc.Name,
+		UID:              string(pvc.UID),
+		CapacityBytes:    pvc.Spec.Resources.Requests.Storage().Value(),
+		Capacity:         pvc.Spec.Resources.Requests.Storage().String(),
+		AccessModes:      accessModes,
+		Mounted:          mountInfo.Mounted,
+		MountedPods:      mountInfo.MountedPods,
+		ViewerSupported:  supported,
+		ViewerMode:       viewerMode,
+		ViewerScheduling: kube.SchedulingForPVC(accessModes, mountInfo),
+		Reason:           reason,
+	}, nil
+}
+
 func (s *ViewerService) namespaceAllowed(namespace string) bool {
 	if len(s.cfg.Viewer.NamespaceAllowlist) == 0 {
 		return true
@@ -360,6 +590,43 @@ func primaryAccessMode(accessModes []string) string {
 		}
 	}
 	return ""
+}
+
+func capacityQuantity(capacity string, capacityBytes int64) (resource.Quantity, error) {
+	if strings.TrimSpace(capacity) != "" {
+		quantity, err := resource.ParseQuantity(strings.TrimSpace(capacity))
+		if err != nil {
+			return resource.Quantity{}, err
+		}
+		if quantity.Sign() <= 0 {
+			return resource.Quantity{}, errors.NewBadRequest("capacity must be positive")
+		}
+		return quantity, nil
+	}
+	if capacityBytes <= 0 {
+		return resource.Quantity{}, errors.NewBadRequest("capacity must be positive")
+	}
+	return *resource.NewQuantity(capacityBytes, resource.BinarySI), nil
+}
+
+func persistentVolumeAccessModes(input []string) ([]corev1.PersistentVolumeAccessMode, error) {
+	if len(input) == 0 {
+		input = []string{domain.AccessModeReadWriteOnce}
+	}
+	accessModes := make([]corev1.PersistentVolumeAccessMode, 0, len(input))
+	for _, mode := range input {
+		switch strings.TrimSpace(mode) {
+		case domain.AccessModeReadWriteOnce:
+			accessModes = append(accessModes, corev1.ReadWriteOnce)
+		case domain.AccessModeReadOnlyMany:
+			accessModes = append(accessModes, corev1.ReadOnlyMany)
+		case domain.AccessModeReadWriteMany:
+			accessModes = append(accessModes, corev1.ReadWriteMany)
+		default:
+			return nil, errors.NewBadRequest("unsupported access mode")
+		}
+	}
+	return accessModes, nil
 }
 
 func statusFromPod(podStatus string) string {

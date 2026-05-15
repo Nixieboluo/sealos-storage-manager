@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	encore "encore.dev"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,6 +32,13 @@ var tracePropagator = propagation.NewCompositeTextMapPropagator(
 type otelTraceSink struct {
 	provider *sdktrace.TracerProvider
 	tracer   trace.Tracer
+}
+
+type encoreTraceData struct {
+	TraceID      string
+	SpanID       string
+	ParentSpanID string
+	Recorded     bool
 }
 
 func newTraceSink(ctx context.Context, cfg config.ObservabilityConfig) (traceSink, error) {
@@ -88,15 +94,15 @@ func ExtractTraceContext(ctx context.Context, headers http.Header) context.Conte
 }
 
 func LinkEncoreTrace(ctx context.Context) context.Context {
-	req := currentEncoreRequest()
-	if req == nil || req.Trace == nil {
+	traceData := currentEncoreTrace()
+	if traceData == nil {
 		return ctx
 	}
-	parentSpanID := strings.TrimSpace(req.Trace.ParentSpanID)
+	parentSpanID := strings.TrimSpace(traceData.ParentSpanID)
 	if parentSpanID == "" {
-		parentSpanID = strings.TrimSpace(req.Trace.SpanID)
+		parentSpanID = strings.TrimSpace(traceData.SpanID)
 	}
-	traceID, err := trace.TraceIDFromHex(strings.TrimSpace(req.Trace.TraceID))
+	traceID, err := trace.TraceIDFromHex(strings.TrimSpace(traceData.TraceID))
 	if err != nil {
 		return ctx
 	}
@@ -105,7 +111,7 @@ func LinkEncoreTrace(ctx context.Context) context.Context {
 		return ctx
 	}
 	flags := trace.TraceFlags(0)
-	if req.Trace.Recorded {
+	if traceData.Recorded {
 		flags = trace.FlagsSampled
 	}
 	spanContext := trace.NewSpanContext(trace.SpanContextConfig{
@@ -118,11 +124,6 @@ func LinkEncoreTrace(ctx context.Context) context.Context {
 		return ctx
 	}
 	return trace.ContextWithRemoteSpanContext(ctx, spanContext)
-}
-
-func currentEncoreRequest() (req *encore.Request) {
-	defer recoverEncoreUnavailable()
-	return encore.CurrentRequest()
 }
 
 func NewOTelTraceSink(provider *sdktrace.TracerProvider) *otelTraceSink {

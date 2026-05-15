@@ -10,7 +10,8 @@ const structureItems = [
 	'src/app',
 	'src/components/ui',
 	'src/features',
-	'src/services/encore',
+	'packages/encore-client',
+	'packages/filebrowser-client',
 	'src/store',
 	'src/styles',
 ]
@@ -74,7 +75,7 @@ export function DashboardShell() {
 						<p className="text-sm leading-6 text-muted-foreground">
 							Encore generated client output is reserved at
 							<code className="mx-1 rounded bg-muted px-1 py-0.5">
-								src/services/encore/client.ts
+								packages/encore-client/src/generated/client.ts
 							</code>
 							and can be refreshed with
 							<code className="mx-1 rounded bg-muted px-1 py-0.5">

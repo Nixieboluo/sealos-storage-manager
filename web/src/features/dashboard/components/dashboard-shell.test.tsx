@@ -14,7 +14,7 @@ describe('dashboardShell', () => {
 			screen.getByRole('heading', { name: 'Sealos Storage Manager' }),
 		).toBeInTheDocument()
 		expect(await screen.findByText('Chrome 86 polyfill build')).toBeVisible()
-		expect(screen.getByText('src/services/encore/client.ts')).toBeVisible()
+		expect(screen.getByText('packages/encore-client/src/generated/client.ts')).toBeVisible()
 		expect(screen.getByText('src/components/ui')).toBeVisible()
 	})
 

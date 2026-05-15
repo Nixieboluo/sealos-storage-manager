@@ -1,0 +1,15 @@
+{
+	"name": "@sealos-storage-manager/encore-client",
+	"type": "module",
+	"version": "0.0.0",
+	"private": true,
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "~6.0.2"
+	}
+}

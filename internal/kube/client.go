@@ -6,6 +6,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -13,6 +15,16 @@ import (
 type Interface interface {
 	GetPVC(ctx context.Context, namespace string, name string) (*corev1.PersistentVolumeClaim, error)
 	ListPVCs(ctx context.Context, namespace string) ([]corev1.PersistentVolumeClaim, error)
+	CreatePVC(ctx context.Context, pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error)
+	DeletePVC(ctx context.Context, namespace string, name string) error
+	UpdatePVCStorageRequest(
+		ctx context.Context,
+		namespace string,
+		name string,
+		storage resource.Quantity,
+	) (*corev1.PersistentVolumeClaim, error)
+	GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error)
+	ListStorageClasses(ctx context.Context) ([]storagev1.StorageClass, error)
 	ListPods(ctx context.Context, namespace string) ([]corev1.Pod, error)
 	ListViewerPods(ctx context.Context, namespace string, labels map[string]string) ([]corev1.Pod, error)
 	GetPod(ctx context.Context, namespace string, name string) (*corev1.Pod, error)
@@ -43,6 +55,61 @@ func (c *Client) ListPVCs(ctx context.Context, namespace string) ([]corev1.Persi
 	list, err := c.clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("listing pvcs in %s: %w", namespace, err)
+	}
+	return list.Items, nil
+}
+
+func (c *Client) CreatePVC(
+	ctx context.Context,
+	pvc *corev1.PersistentVolumeClaim,
+) (*corev1.PersistentVolumeClaim, error) {
+	created, err := c.clientset.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("creating pvc %s/%s: %w", pvc.Namespace, pvc.Name, err)
+	}
+	return created, nil
+}
+
+func (c *Client) DeletePVC(ctx context.Context, namespace string, name string) error {
+	if err := c.clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("deleting pvc %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func (c *Client) UpdatePVCStorageRequest(
+	ctx context.Context,
+	namespace string,
+	name string,
+	storage resource.Quantity,
+) (*corev1.PersistentVolumeClaim, error) {
+	pvc, err := c.GetPVC(ctx, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	if pvc.Spec.Resources.Requests == nil {
+		pvc.Spec.Resources.Requests = corev1.ResourceList{}
+	}
+	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = storage
+	updated, err := c.clientset.CoreV1().PersistentVolumeClaims(namespace).Update(ctx, pvc, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("updating pvc %s/%s storage request: %w", namespace, name, err)
+	}
+	return updated, nil
+}
+
+func (c *Client) GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	storageClass, err := c.clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("getting storageclass %s: %w", name, err)
+	}
+	return storageClass, nil
+}
+
+func (c *Client) ListStorageClasses(ctx context.Context) ([]storagev1.StorageClass, error) {
+	list, err := c.clientset.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("listing storageclasses: %w", err)
 	}
 	return list.Items, nil
 }

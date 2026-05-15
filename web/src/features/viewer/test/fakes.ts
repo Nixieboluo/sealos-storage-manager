@@ -2,6 +2,7 @@ import type {
 	Heartbeat,
 	PodSession,
 	PVC,
+	StorageClass,
 	ViewerAPI,
 	ViewerSession,
 	ViewerToken,
@@ -25,6 +26,19 @@ export function pvcFixture(overrides: Partial<PVC> = {}): PVC {
 			requires_node: false,
 		},
 		viewer_supported: true,
+		...overrides,
+	}
+}
+
+export function storageClassFixture(overrides: Partial<StorageClass> = {}): StorageClass {
+	return {
+		name: 'standard',
+		provisioner: 'kubernetes.io/no-provisioner',
+		allow_volume_expansion: true,
+		volume_binding_mode: 'Immediate',
+		is_default: true,
+		reclaim_policy: 'Delete',
+		creation_timestamp: '2026-05-14T10:00:00Z',
 		...overrides,
 	}
 }
@@ -94,6 +108,14 @@ export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerA
 	return {
 		closePodSession: async () => podSessionFixture({ status: 'terminated' }),
 		closeViewerSession: async id => viewerSessionFixture({ id, status: 'closed' }),
+		createPVC: async input =>
+			pvcFixture({
+				namespace: input.namespace,
+				name: input.name,
+				capacity: input.capacity,
+				capacity_bytes: input.capacityBytes,
+				access_modes: input.accessModes,
+			}),
 		createViewerSession: async input =>
 			viewerSessionFixture({
 				id: 'vs_created',
@@ -106,11 +128,24 @@ export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerA
 						: { reason: 'missing pvc' }
 				),
 			}),
+		deletePVC: async input =>
+			pvcFixture({
+				namespace: input.namespace,
+				name: input.name,
+			}),
+		expandPVC: async input =>
+			pvcFixture({
+				namespace: input.namespace,
+				name: input.name,
+				capacity: input.capacity,
+				capacity_bytes: input.capacityBytes,
+			}),
 		getPodSession: async id => podSessionFixture({ id }),
 		getViewerSession: async id => viewerSessionFixture({ id, status: 'ready', token_ready: true }),
 		heartbeatViewerSession: async id => heartbeatFixture({ viewer_session_id: id }),
 		issueViewerToken: async id => viewerTokenFixture({ viewer_session_id: id }),
 		listPVCs: async () => [pvcFixture()],
+		listStorageClasses: async () => [storageClassFixture()],
 		...overrides,
 	}
 }

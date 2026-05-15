@@ -4,6 +4,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 
 import { I18nProvider } from '@/app/providers/i18n-provider'
 import { TanStackDevtoolsPanel } from '@/app/providers/tanstack-devtools-panel'
+import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { queryClient } from '@/services/query-client'
 
@@ -17,6 +18,7 @@ export function AppProviders({ children }: AppProvidersProps) {
 			<I18nProvider>
 				<TooltipProvider>{children}</TooltipProvider>
 			</I18nProvider>
+			<Toaster richColors />
 			<ReactQueryDevtools buttonPosition="bottom-left" initialIsOpen={false} />
 			<TanStackDevtoolsPanel />
 		</QueryClientProvider>

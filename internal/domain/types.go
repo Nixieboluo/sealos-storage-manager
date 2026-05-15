@@ -108,6 +108,16 @@ type PVC struct {
 	Reason           string           `json:"reason"`
 }
 
+type StorageClass struct {
+	Name                     string `json:"name"`
+	Provisioner              string `json:"provisioner"`
+	AllowVolumeExpansion     bool   `json:"allow_volume_expansion"`
+	VolumeBindingMode        string `json:"volume_binding_mode"`
+	IsDefault                bool   `json:"is_default"`
+	ReclaimPolicy            string `json:"reclaim_policy"`
+	CreationTimestampRFC3339 string `json:"creation_timestamp"`
+}
+
 type PVCMountInfo struct {
 	Mounted     bool
 	MountedPods []MountedPod
