@@ -1,7 +1,10 @@
 package config
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -215,6 +218,46 @@ func TestCommittedExampleConfigLoads(t *testing.T) {
 	}
 }
 
+func TestCommittedHookScriptAcceptsSpacedJSON(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	cfg, err := LoadFile(filepath.Join(root, "config", "viewer.example.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile(viewer.example.yaml) error = %v", err)
+	}
+	scriptPath := filepath.Join(t.TempDir(), "filebrowser-auth-hook.sh")
+	if err := os.WriteFile(scriptPath, []byte(cfg.Viewer.HookScript), 0o755); err != nil {
+		t.Fatalf("write hook script: %v", err)
+	}
+	verify := responseServer(t, `{
+  "filebrowser_hook_verification": {
+    "allow": true,
+    "permissions": {
+      "create": true
+    }
+  }
+}`)
+
+	output, err := runHookScript(t, scriptPath, map[string]string{
+		"PASSWORD":           "ar_1234567890abcdef.secret",
+		"USERNAME":           "vs_1234567890abcdef",
+		"POD_SESSION_ID":     "ps_1234567890abcdef",
+		"VIEWER_POD_NAME":    "viewer-ps-1234567890abcdef",
+		"HOOK_CLIENT_TOKEN":  "hook-token",
+		"BACKEND_VERIFY_URL": verify.URL,
+	})
+	if err != nil {
+		t.Fatalf("hook script error = %v output=%s", err, output)
+	}
+	if !strings.Contains(output, "hook.action=auth") {
+		t.Fatalf("output = %s", output)
+	}
+	if !strings.Contains(output, "user.perm.create=true") {
+		t.Fatalf("output = %s", output)
+	}
+}
+
 func TestDeployConfigMapEmbedsValidViewerConfig(t *testing.T) {
 	t.Parallel()
 
@@ -236,6 +279,29 @@ func TestDeployConfigMapEmbedsValidViewerConfig(t *testing.T) {
 	if _, err := Load([]byte(viewerYAML)); err != nil {
 		t.Fatalf("embedded viewer.yaml error = %v", err)
 	}
+}
+
+func responseServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func runHookScript(t *testing.T, scriptPath string, env map[string]string) (string, error) {
+	t.Helper()
+
+	cmd := exec.Command("/bin/sh", scriptPath) //nolint:gosec // Test executes a committed hook script fixture.
+	cmd.Env = os.Environ()
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func replaceConfig(t *testing.T, body string, old string, replacement string) string {

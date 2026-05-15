@@ -55,7 +55,7 @@ viewer:
       -d "$BODY" \
       "${BACKEND_VERIFY_URL:-}")" || fail
 
-    echo "$RESPONSE" | grep -q '"allow":true' || fail
+    echo "$RESPONSE" | grep -q '"allow"[[:space:]]*:[[:space:]]*true' || fail
 
     echo "hook.action=auth"
     echo "user.scope=/"
@@ -63,7 +63,7 @@ viewer:
     echo "user.perm.execute=false"
     echo "user.perm.share=false"
     echo "user.perm.download=true"
-    if echo "$RESPONSE" | grep -q '"create":true'; then
+    if echo "$RESPONSE" | grep -q '"create"[[:space:]]*:[[:space:]]*true'; then
       echo "user.perm.create=true"
       echo "user.perm.rename=true"
       echo "user.perm.modify=true"
