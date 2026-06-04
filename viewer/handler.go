@@ -166,7 +166,9 @@ type FileBrowserHookVerificationResponse struct {
 }
 
 type ErrorDetails struct {
-	Code apienv.Code `json:"code"`
+	Code    apienv.Code    `json:"code"`
+	Details map[string]any `json:"details,omitempty"`
+	Message string         `json:"message,omitempty"`
 }
 
 func (ErrorDetails) ErrDetails() {}
@@ -966,7 +968,11 @@ func toEncoreError(apiErr *apienv.Error) error {
 	return errs.B().
 		Code(toEncoreErrorCode(apiErr.Status)).
 		Msg(apiErr.Message).
-		Details(ErrorDetails{Code: apiErr.Code}).
+		Details(ErrorDetails{
+			Code:    apiErr.Code,
+			Details: apiErr.Details,
+			Message: apiErr.Message,
+		}).
 		Err()
 }
 
@@ -1000,7 +1006,13 @@ func (h *Handler) authorizeViewerSessionPVC(
 	if err != nil {
 		return err
 	}
-	return h.authorizePodSessionPVC(ctx, principal, session.PodSessionID)
+	if session.Namespace == "" || session.PVCName == "" {
+		return apienv.NewError(500, apienv.CodeInternalError, "Viewer session is missing PVC identity", nil)
+	}
+	if err := h.authz.CanGetPVC(ctx, principal, session.Namespace, session.PVCName); err != nil {
+		return apienv.NewError(403, apienv.CodePVCAccessDenied, "PVC access denied", nil)
+	}
+	return nil
 }
 
 func (h *Handler) authorizePodSessionPVC(

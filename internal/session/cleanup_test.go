@@ -123,7 +123,7 @@ func TestCleanupKeepsExpiredPodWithActiveViewer(t *testing.T) {
 	}
 }
 
-func TestCleanupReconcilesViewerPodsAcrossAllNamespaces(t *testing.T) {
+func TestCleanupDeletesOrphanViewerPodsAcrossAllNamespaces(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig()
@@ -177,11 +177,11 @@ func TestCleanupReconcilesViewerPodsAcrossAllNamespaces(t *testing.T) {
 	if err := cleanup.RunOnce(t.Context()); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
-	if _, ok := store.GetPodSession("ps_valid", fixedNow()); !ok {
-		t.Fatal("cleanup did not recover valid viewer pod from another namespace")
+	if _, ok := store.GetPodSession("ps_valid", fixedNow()); ok {
+		t.Fatal("cleanup recovered orphan viewer pod into state")
 	}
-	if _, err := clientset.CoreV1().Pods("ns-a").Get(t.Context(), "viewer-ps-valid", metav1.GetOptions{}); err != nil {
-		t.Fatalf("valid viewer pod was not kept: %v", err)
+	if _, err := clientset.CoreV1().Pods("ns-a").Get(t.Context(), "viewer-ps-valid", metav1.GetOptions{}); err == nil {
+		t.Fatal("cleanup did not delete orphan viewer pod from another namespace")
 	}
 	if _, err := clientset.CoreV1().Pods("ns-b").Get(t.Context(), "viewer-ps-old", metav1.GetOptions{}); err == nil {
 		t.Fatal("cleanup did not delete old orphan viewer pod from another namespace")
@@ -235,7 +235,7 @@ func TestCleanupDeletesExpiredAnnotatedViewerPodAfterRestart(t *testing.T) {
 	}
 }
 
-func TestReconcileViewerPodsRecoversRecentPod(t *testing.T) {
+func TestReconcileViewerPodsDeletesRecentOrphanPod(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig()
@@ -256,10 +256,11 @@ func TestReconcileViewerPodsRecoversRecentPod(t *testing.T) {
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodPending},
 	}
+	clientset := fake.NewSimpleClientset(pod)
 	service := NewPodService(
 		cfg,
 		store,
-		kube.New(fake.NewSimpleClientset(pod)),
+		kube.New(clientset),
 		observability.MustNew(cfg.Observability, nil),
 	)
 	service.now = fixedNow
@@ -267,8 +268,11 @@ func TestReconcileViewerPodsRecoversRecentPod(t *testing.T) {
 	if err := service.ReconcileViewerPods(t.Context(), "default"); err != nil {
 		t.Fatalf("ReconcileViewerPods() error = %v", err)
 	}
-	if _, ok := store.GetPodSession("ps_recent", fixedNow()); !ok {
-		t.Fatal("recent pod was not recovered into state")
+	if _, ok := store.GetPodSession("ps_recent", fixedNow()); ok {
+		t.Fatal("recent orphan pod was recovered into state")
+	}
+	if _, err := clientset.CoreV1().Pods("default").Get(t.Context(), "viewer-ps_recent", metav1.GetOptions{}); err == nil {
+		t.Fatal("recent orphan pod was not deleted")
 	}
 }
 

@@ -62,12 +62,12 @@ function reconnectingCapability() {
 	})
 }
 
-function renderFileManager(session: FileBrowserSession | null, currentPath = '/') {
+function renderFileManager(session: FileBrowserSession | null, currentPath = '/', onPathChange = vi.fn()) {
 	return renderWithProviders(
 		<FileManagerView
 			currentPath={currentPath}
 			onBackToVolumes={vi.fn()}
-			onPathChange={vi.fn()}
+			onPathChange={onPathChange}
 			onReconnect={vi.fn()}
 			onRefreshSession={vi.fn()}
 			pvcName="data"
@@ -131,6 +131,130 @@ describe('fileManagerView', () => {
 		expect(await screen.findByText('file-29.txt')).toBeInTheDocument()
 		expect(screen.getByText('file-0.txt')).toBeInTheDocument()
 		expect(screen.queryByText(/enter folder/i)).not.toBeInTheDocument()
+	})
+
+	it('shows branch loading in the folder chevron without adding a placeholder row', async () => {
+		const user = userEvent.setup()
+		let resolveDocs: (value: FileBrowserResource) => void = () => undefined
+		const docsPromise = new Promise<FileBrowserResource>((resolve) => {
+			resolveDocs = resolve
+		})
+		const list = vi.fn(async (path: string) => {
+			if (path === '/docs') {
+				return docsPromise
+			}
+			return resource('/', '', true, [
+				resource('/docs', 'docs', true),
+				resource('/readme.md', 'readme.md', false),
+			])
+		})
+		const session = {
+			client: {
+				list,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('docs')
+		await user.click(screen.getByRole('button', { name: /toggle folder/i }))
+
+		expect(screen.getByText('docs')).toBeInTheDocument()
+		expect(screen.getByText('readme.md')).toBeInTheDocument()
+		expect(screen.queryByText(/pending file list/i)).not.toBeInTheDocument()
+
+		resolveDocs(resource('/docs', 'docs', true, []))
+		await waitFor(() => expect(list).toHaveBeenCalledWith('/docs', expect.any(AbortSignal)))
+	})
+
+	it('opens folders from the entry name', async () => {
+		const user = userEvent.setup()
+		const onPathChange = vi.fn()
+		const session = {
+			client: {
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/docs', 'docs', true),
+				])),
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session, '/', onPathChange)
+
+		await user.click(await screen.findByText('docs'))
+
+		expect(onPathChange).toHaveBeenCalledWith('/docs')
+	})
+
+	it('keeps file table columns fixed and formats modified time for reading', async () => {
+		const modified = '2026-05-14T10:00:00Z'
+		const session = {
+			client: {
+				list: vi.fn(async () => resource('/', '', true, [
+					{ ...resource('/readme.md', 'readme.md', false), modified },
+				])),
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('readme.md')
+		const table = screen.getByRole('table')
+		expect(table).toHaveClass('table-fixed')
+		expect(table.querySelector('colgroup')).not.toBeNull()
+		expect(table.querySelectorAll('col')).toHaveLength(4)
+		const modifiedTime = table.querySelector(`time[datetime="${modified}"]`)
+		expect(modifiedTime).not.toBeNull()
+		expect(modifiedTime).not.toHaveTextContent(modified)
+		expect(modifiedTime?.textContent).toContain('2026')
+		expect(modifiedTime).toHaveAttribute('title', expect.stringContaining('2026'))
+	})
+
+	it('opens editable files from the entry name', async () => {
+		const user = userEvent.setup()
+		const readText = vi.fn().mockResolvedValue('hello')
+		const session = {
+			client: {
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/readme.md', 'readme.md', false),
+				])),
+				readText,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await user.click(await screen.findByText('readme.md'))
+
+		expect(await screen.findByLabelText(/monaco editor/i)).toHaveValue('hello')
+		expect(readText).toHaveBeenCalledWith('/readme.md', expect.any(AbortSignal))
+	})
+
+	it('keeps non-editable file names inert', async () => {
+		const user = userEvent.setup()
+		const downloadUrl = vi.fn(() => 'https://viewer.example.test/api/raw/archive.zip?auth=token')
+		const readText = vi.fn()
+		const session = {
+			client: {
+				downloadUrl,
+				list: vi.fn(async () => resource('/', '', true, [
+					resource('/archive.zip', 'archive.zip', false),
+				])),
+				readText,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await user.click(await screen.findByText('archive.zip'))
+
+		expect(downloadUrl).not.toHaveBeenCalled()
+		expect(readText).not.toHaveBeenCalled()
+		expect(screen.queryByLabelText(/monaco editor/i)).not.toBeInTheDocument()
 	})
 
 	it('does not freeze when an expanded folder response includes itself', async () => {
@@ -502,6 +626,41 @@ describe('fileManagerView', () => {
 			status: 'success',
 			viewerSessionID: 'vs-1',
 		}))
+	})
+
+	it('uploads files to the selected dialog target path', async () => {
+		const user = userEvent.setup()
+		const uploadFile = vi.fn(async () => undefined)
+		const list = vi.fn(async (path: string) => {
+			if (path === '/docs') {
+				return resource('/docs', 'docs', true, [
+					resource('/docs/nested', 'nested', true),
+				])
+			}
+			return resource('/', '', true, [
+				resource('/docs', 'docs', true),
+				resource('/readme.md', 'readme.md', false),
+			])
+		})
+		const session = {
+			client: {
+				list,
+				uploadFile,
+			},
+			pvcKey: 'pvc-1',
+		} as unknown as FileBrowserSession
+
+		renderFileManager(session)
+
+		await screen.findByText('readme.md')
+		await user.click(screen.getByRole('button', { name: /upload file/i }))
+		await user.click(await screen.findByRole('button', { name: 'docs' }))
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement
+		await user.upload(input, new File(['contents'], 'demo.txt'))
+		await user.click(screen.getAllByRole('button', { name: /upload file/i }).at(-1)!)
+
+		await waitFor(() => expect(uploadFile).toHaveBeenCalled())
+		expect(uploadFile).toHaveBeenCalledWith('/docs', expect.any(File), expect.any(Object))
 	})
 
 	it('keeps upload task progress updates out of the file table render path', async () => {

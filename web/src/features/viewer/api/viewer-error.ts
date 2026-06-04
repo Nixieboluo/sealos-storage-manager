@@ -20,6 +20,7 @@ export const viewerErrorMessageKeys = {
 	STORAGE_CLASS_NOT_FOUND: 'errors.storageClassNotFound',
 	VIEWER_POD_CREATING: 'errors.viewerPodCreating',
 	VIEWER_POD_FAILED: 'errors.viewerPodFailed',
+	POD_SESSION_NOT_FOUND: 'errors.podSessionNotFound',
 	VIEWER_SESSION_NOT_FOUND: 'errors.viewerSessionNotFound',
 	VIEWER_SESSION_EXPIRED: 'errors.viewerSessionExpired',
 	AUTH_REQUEST_EXPIRED: 'errors.authRequestExpired',
@@ -33,7 +34,9 @@ export const viewerErrorMessageKeys = {
 
 interface EncoreErrorDetails {
 	Code?: string
+	message?: string
 	code?: string
+	Message?: string
 }
 
 const backendViewerErrorCodeSet = new Set<string>(backendViewerErrorCodes)
@@ -60,6 +63,14 @@ function detailCode(details: unknown): string | undefined {
 	return typed.Code ?? typed.code
 }
 
+function detailMessage(details: unknown): string | undefined {
+	if (!details || typeof details !== 'object') {
+		return undefined
+	}
+	const typed = details as EncoreErrorDetails
+	return typed.Message ?? typed.message
+}
+
 export function isViewerErrorCode(code: string): code is ViewerErrorCode {
 	return backendViewerErrorCodeSet.has(code)
 }
@@ -76,12 +87,13 @@ export function normalizeViewerError(error: unknown): ViewerApiError {
 		return error
 	}
 	if (isAPIError(error)) {
+		const message = detailMessage(error.details) ?? error.message
 		return new ViewerApiError({
 			code: normalizeViewerErrorCode(detailCode(error.details) ?? error.code),
 			details: typeof error.details === 'object' && error.details !== null
 				? error.details as Record<string, unknown>
 				: {},
-			message: error.message,
+			message,
 			status: error.status,
 		})
 	}
@@ -101,14 +113,23 @@ export function isViewerApiError(error: unknown): error is ViewerApiError {
 	return error instanceof ViewerApiError
 }
 
+export function isMissingSessionError(error: unknown) {
+	const apiError = normalizeViewerError(error)
+	return apiError.code === 'VIEWER_SESSION_NOT_FOUND' || apiError.code === 'POD_SESSION_NOT_FOUND'
+}
+
 export function viewerErrorMessageKey(code: ViewerErrorCode) {
 	return viewerErrorMessageKeys[code]
 }
 
 export function translateViewerError(error: unknown, t: TFunction) {
 	const apiError = normalizeViewerError(error)
-	return t(viewerErrorMessageKey(apiError.code), {
+	const localized = t(viewerErrorMessageKey(apiError.code), {
 		defaultValue: t('errors.generic'),
 		reason: apiError.message,
 	})
+	if (!apiError.message || localized.includes(apiError.message)) {
+		return localized
+	}
+	return `${localized}\n${apiError.message}`
 }

@@ -82,6 +82,108 @@ describe('useViewerSessionFlow', () => {
 		expect(createViewerSession).toHaveBeenCalledTimes(2)
 	})
 
+	it('recreates a session when backend reports POD_SESSION_NOT_FOUND', async () => {
+		vi.useFakeTimers()
+		const createViewerSession = vi
+			.fn()
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_old', status: 'creating' }))
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_new', status: 'creating' }))
+		const getViewerSession = vi.fn().mockRejectedValue(new ViewerApiError({
+			code: 'POD_SESSION_NOT_FOUND',
+			message: 'pod lost',
+			status: 404,
+		}))
+		const api = createFakeViewerAPI({
+			createViewerSession,
+			getViewerSession,
+		})
+
+		const { result } = renderHookWithProviders(() =>
+			useViewerSessionFlow({ api, pollIntervalMs: 1000 }),
+		)
+
+		await act(async () => {
+			await result.current.start({
+				namespace: 'default',
+				pvcName: 'data',
+				uid: 'uid',
+			})
+		})
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1000)
+		})
+
+		await vi.waitFor(() => expect(result.current.session?.id).toBe('vs_new'))
+		expect(result.current.error).toBeNull()
+		expect(createViewerSession).toHaveBeenCalledTimes(2)
+	})
+
+	it('recreates a session when token issuance reports POD_SESSION_NOT_FOUND', async () => {
+		const createViewerSession = vi
+			.fn()
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_old', status: 'ready', token_ready: true }))
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_new', status: 'creating' }))
+		const issueViewerToken = vi.fn().mockRejectedValue(new ViewerApiError({
+			code: 'POD_SESSION_NOT_FOUND',
+			message: 'Pod session no longer exists',
+			status: 404,
+		}))
+		const api = createFakeViewerAPI({
+			createViewerSession,
+			issueViewerToken,
+		})
+
+		const { result } = renderHookWithProviders(() =>
+			useViewerSessionFlow({ api }),
+		)
+
+		await act(async () => {
+			await result.current.start({
+				namespace: 'default',
+				pvcName: 'data',
+				uid: 'uid',
+			})
+		})
+
+		await vi.waitFor(() => expect(result.current.session?.id).toBe('vs_new'))
+		expect(issueViewerToken).toHaveBeenCalledWith('vs_old')
+		expect(createViewerSession).toHaveBeenCalledTimes(2)
+	})
+
+	it('stops automatic recovery after the retry limit', async () => {
+		const createViewerSession = vi
+			.fn()
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_first', status: 'ready', token_ready: true }))
+			.mockResolvedValueOnce(viewerSessionFixture({ id: 'vs_second', status: 'ready', token_ready: true }))
+		const issueViewerToken = vi.fn().mockRejectedValue(new ViewerApiError({
+			code: 'POD_SESSION_NOT_FOUND',
+			message: 'Pod session no longer exists',
+			status: 404,
+		}))
+		const api = createFakeViewerAPI({
+			createViewerSession,
+			issueViewerToken,
+		})
+
+		const { result } = renderHookWithProviders(() =>
+			useViewerSessionFlow({ api, maxAutoRecoveries: 1 }),
+		)
+
+		await act(async () => {
+			await result.current.start({
+				namespace: 'default',
+				pvcName: 'data',
+				uid: 'uid',
+			})
+		})
+
+		await vi.waitFor(() => expect(result.current.status).toBe('failed'))
+		expect(result.current.error?.code).toBe('POD_SESSION_NOT_FOUND')
+		expect(createViewerSession).toHaveBeenCalledTimes(2)
+		expect(issueViewerToken).toHaveBeenCalledTimes(2)
+	})
+
 	it('does not recover after a manual close is registered', async () => {
 		const createViewerSession = vi.fn().mockResolvedValue(viewerSessionFixture({ id: 'vs_1', status: 'creating' }))
 		const api = createFakeViewerAPI({ createViewerSession })

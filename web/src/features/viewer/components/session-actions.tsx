@@ -22,6 +22,7 @@ import { viewerUIStore } from '@/features/viewer/stores/viewer-ui-store'
 
 interface SessionActionsProps {
 	api?: ViewerAPI
+	canDiscardLocalState?: boolean
 	onManualClose?: (kind: ManualCloseKind) => void
 	podSessionID: string | null
 	viewerSessionID: string | null
@@ -29,6 +30,7 @@ interface SessionActionsProps {
 
 export function SessionActions({
 	api = viewerApi,
+	canDiscardLocalState = false,
 	onManualClose,
 	podSessionID,
 	viewerSessionID,
@@ -72,28 +74,43 @@ export function SessionActions({
 					<Power />
 					{t('actions.closeViewer')}
 				</Button>
-				<Button
-					disabled={!podSessionID || closePod.isPending}
-					onClick={() => {
-						if (!podSessionID) {
-							return
-						}
-						if (hasActiveUpload) {
-							showUploadGuard('pod')
-							return
-						}
-						closePod.mutate(podSessionID, {
-							onSuccess: () => {
-								viewerUIStore.actions.setActiveSession(null, null)
-								onManualClose?.('pod')
-							},
-						})
-					}}
-					variant="destructive"
-				>
-					<ServerOff />
-					{t('actions.closePod')}
-				</Button>
+				{podSessionID
+					? (
+							<Button
+								disabled={closePod.isPending}
+								onClick={() => {
+									if (hasActiveUpload) {
+										showUploadGuard('pod')
+										return
+									}
+									closePod.mutate(podSessionID, {
+										onSuccess: () => {
+											viewerUIStore.actions.setActiveSession(null, null)
+											onManualClose?.('pod')
+										},
+									})
+								}}
+								variant="destructive"
+							>
+								<ServerOff />
+								{t('actions.closePod')}
+							</Button>
+						)
+					: null}
+				{canDiscardLocalState && !viewerSessionID && !podSessionID
+					? (
+							<Button
+								onClick={() => {
+									viewerUIStore.actions.setActiveSession(null, null)
+									onManualClose?.('pod')
+								}}
+								variant="destructive"
+							>
+								<ServerOff />
+								{t('actions.closePod')}
+							</Button>
+						)
+					: null}
 			</div>
 			<Dialog onOpenChange={open => !open && setBlockedClose(null)} open={blockedClose !== null}>
 				<DialogContent>

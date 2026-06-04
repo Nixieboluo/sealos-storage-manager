@@ -107,7 +107,7 @@ describe('file tree helpers', () => {
 		expect(rows.some(row => row.kind !== 'resource')).toBe(false)
 	})
 
-	it('inserts branch loading and error rows for expanded folders', () => {
+	it('keeps loading folders on their own row and inserts error rows', () => {
 		const rootEntries = flattenResources({
 			path: '/',
 			name: '',
@@ -127,7 +127,6 @@ describe('file tree helpers', () => {
 
 		expect(rows.map(row => row.kind)).toEqual([
 			'resource',
-			'branch-loading',
 			'resource',
 			'branch-error',
 		])

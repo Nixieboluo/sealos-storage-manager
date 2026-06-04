@@ -20,12 +20,6 @@ export type FileTableRow
 	}
 	| {
 		depth: number
-		id: string
-		kind: 'branch-loading'
-		path: string
-	}
-	| {
-		depth: number
 		error: Error
 		id: string
 		kind: 'branch-error'

@@ -37,6 +37,7 @@ func TestAllCodesContainsEveryPublicBusinessCode(t *testing.T) {
 		CodePVCMountPending,
 		CodeViewerPodCreating,
 		CodeViewerPodFailed,
+		CodePodSessionNotFound,
 		CodeViewerSessionNotFound,
 		CodeViewerSessionExpired,
 		CodeAuthRequestExpired,

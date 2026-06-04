@@ -1,10 +1,12 @@
 package session
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
@@ -12,9 +14,13 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func TestEnsurePodSessionCreatesResources(t *testing.T) {
@@ -111,7 +117,44 @@ func TestEnsurePodSessionCreatesResources(t *testing.T) {
 	}
 }
 
-func TestEnsurePodSessionReusesExistingViewerPod(t *testing.T) {
+func TestEnsurePodSessionMapsPodQuotaFailure(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	store := state.New(cfg.Cache)
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("create", "pods", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "pods"},
+			"viewer-ps-quota",
+			errors.New("exceeded quota: quota-ns-admin, requested: pods=1, used: pods=8, limited: pods=8"),
+		)
+	})
+	service := NewPodService(cfg, store, kube.New(clientset), observability.MustNew(cfg.Observability, nil))
+	service.now = fixedNow
+
+	_, err := service.EnsurePodSession(t.Context(), EnsurePodSessionInput{
+		Namespace:  "ns-admin",
+		PVCName:    "data",
+		PVCUID:     "uid",
+		AccessMode: domain.AccessModeReadWriteOnce,
+		Mode:       domain.ModeReadWrite,
+		MountInfo:  &domain.PVCMountInfo{},
+	})
+
+	var apiErr *apienv.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("EnsurePodSession() error = %T %v, want apienv.Error", err, err)
+	}
+	if apiErr.Code != apienv.CodeViewerPodFailed || apiErr.Status != 403 {
+		t.Fatalf("api error = %#v", apiErr)
+	}
+	if !strings.Contains(apiErr.Message, "exceeded quota") {
+		t.Fatalf("api message = %q, want quota detail", apiErr.Message)
+	}
+}
+
+func TestEnsurePodSessionDeletesOrphanViewerPodBeforeCreatingReplacement(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig()
@@ -151,11 +194,17 @@ func TestEnsurePodSessionReusesExistingViewerPod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsurePodSession() error = %v", err)
 	}
-	if podSession.ID != "ps_existing" || podSession.Status != domain.PodStatusReady {
+	if podSession.ID == "ps_existing" || podSession.Status != domain.PodStatusCreating {
 		t.Fatalf("pod session = %#v", podSession)
 	}
 	if podSession.RuntimeVersion != version {
 		t.Fatalf("runtime version = %q, want %q", podSession.RuntimeVersion, version)
+	}
+	if _, err := client.GetPod(t.Context(), "default", "viewer-ps_existing"); !apierrors.IsNotFound(err) {
+		t.Fatalf("old viewer pod error = %v, want not found", err)
+	}
+	if _, err := client.GetPod(t.Context(), "default", podSession.PodName); err != nil {
+		t.Fatalf("replacement viewer pod missing: %v", err)
 	}
 }
 
@@ -343,6 +392,9 @@ func TestSyncPodStatusReportsCrashLoop(t *testing.T) {
 	}
 	if updated.Status != domain.PodStatusFailed || updated.Reason != "CrashLoopBackOff" {
 		t.Fatalf("updated = %#v", updated)
+	}
+	if _, ok := store.GetPodSession("ps_crash", fixedNow()); ok {
+		t.Fatal("SyncPodStatus wrote Kubernetes-derived pod state back to store")
 	}
 }
 

@@ -2,19 +2,25 @@ package session
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type staticLogin struct {
@@ -77,6 +83,37 @@ func TestCreateViewerSessionRejectsRWOP(t *testing.T) {
 		UserID:    "user",
 	}); err == nil {
 		t.Fatal("CreateViewerSession() error = nil")
+	}
+}
+
+func TestCreateViewerSessionPreservesTransientPVCGetErrors(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "persistentvolumeclaims", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("client rate limiter Wait returned an error: context canceled")
+	})
+	client := kube.New(clientset)
+	store := state.New(cfg.Cache)
+	pods := NewPodService(cfg, store, client, observability.MustNew(cfg.Observability, nil))
+	service := NewViewerService(cfg, store, client, pods, nil, observability.MustNew(cfg.Observability, nil))
+
+	_, err := service.CreateViewerSession(t.Context(), CreateViewerSessionInput{
+		Namespace: "default",
+		PVCName:   "data",
+		UserID:    "user",
+	})
+
+	if err == nil {
+		t.Fatal("CreateViewerSession() error = nil")
+	}
+	var apiErr *apienv.Error
+	if errors.As(err, &apiErr) && apiErr.Code == apienv.CodePVCNotFound {
+		t.Fatalf("transient get error was mapped to PVC_NOT_FOUND: %#v", apiErr)
+	}
+	if !strings.Contains(err.Error(), "client rate limiter") {
+		t.Fatalf("error = %v, want original transient error", err)
 	}
 }
 
@@ -288,6 +325,136 @@ func TestIssueTokenSyncsPodStatusBeforeReadinessCheck(t *testing.T) {
 	}
 }
 
+func TestIssueTokenReplacesMissingPodSessionAndDeletesOldPod(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	version := runtimeVersion(cfg)
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "data", UID: types.UID("uid")},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:         "default",
+			Name:              "viewer-ps_recovered",
+			CreationTimestamp: metav1.NewTime(fixedNow()),
+			Labels: map[string]string{
+				labelComponent:      componentViewer,
+				labelPVCUID:         "uid",
+				labelPodSessionID:   "ps_recovered",
+				labelRuntimeVersion: version,
+			},
+			Annotations: map[string]string{
+				annotationRuntimeVersion: version,
+				annotationKeepaliveUntil: fixedNow().Add(time.Minute).Format(time.RFC3339Nano),
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{
+				Type:   corev1.PodReady,
+				Status: corev1.ConditionTrue,
+			}},
+		},
+	}
+	client := kube.New(fake.NewSimpleClientset(pvc, pod))
+	store := state.New(cfg.Cache)
+	pods := NewPodService(cfg, store, client, observability.MustNew(cfg.Observability, nil))
+	pods.now = fixedNow
+	auth := NewAuthService(cfg, store, staticLogin{token: "fb-token"}, observability.MustNew(cfg.Observability, nil))
+	service := NewViewerService(cfg, store, client, pods, auth, observability.MustNew(cfg.Observability, nil))
+	service.now = fixedNow
+	store.PutViewerSession(&domain.ViewerSession{
+		ID:           "vs_1",
+		UserID:       "owner",
+		PodSessionID: "ps_recovered",
+		Namespace:    "default",
+		PVCName:      "data",
+		ExpiresAt:    fixedNow().Add(time.Minute),
+	})
+
+	_, err := service.IssueToken(t.Context(), "vs_1", "owner")
+	var apiErr *apienv.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("IssueToken() error = %T %v, want apienv.Error", err, err)
+	}
+	if apiErr.Code != apienv.CodeViewerPodCreating {
+		t.Fatalf("code = %s, want %s", apiErr.Code, apienv.CodeViewerPodCreating)
+	}
+	if _, err := client.GetPod(t.Context(), "default", "viewer-ps_recovered"); !apierrors.IsNotFound(err) {
+		t.Fatalf("old viewer pod error = %v, want not found", err)
+	}
+	updated, ok := store.GetViewerSession("vs_1", fixedNow())
+	if !ok {
+		t.Fatal("viewer session missing")
+	}
+	if updated.PodSessionID == "ps_recovered" {
+		t.Fatalf("viewer session still references old pod session: %#v", updated)
+	}
+	if _, ok := store.GetPodSession(updated.PodSessionID, fixedNow()); !ok {
+		t.Fatal("replacement pod session was not stored")
+	}
+}
+
+func TestIssueTokenUsesReadyReplacementPodSession(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "data", UID: types.UID("uid")},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			},
+		},
+	}
+	clientset := fake.NewSimpleClientset(pvc)
+	clientset.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		create := action.(ktesting.CreateAction)
+		pod := create.GetObject().(*corev1.Pod).DeepCopy()
+		pod.Status.Phase = corev1.PodRunning
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:   corev1.PodReady,
+			Status: corev1.ConditionTrue,
+		}}
+		if err := clientset.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), pod, pod.Namespace); err != nil {
+			return true, nil, err
+		}
+		return true, pod, nil
+	})
+	client := kube.New(clientset)
+	store := state.New(cfg.Cache)
+	pods := NewPodService(cfg, store, client, observability.MustNew(cfg.Observability, nil))
+	pods.now = fixedNow
+	auth := NewAuthService(cfg, store, staticLogin{token: "fb-token"}, observability.MustNew(cfg.Observability, nil))
+	service := NewViewerService(cfg, store, client, pods, auth, observability.MustNew(cfg.Observability, nil))
+	service.now = fixedNow
+	store.PutViewerSession(&domain.ViewerSession{
+		ID:           "vs_1",
+		UserID:       "owner",
+		PodSessionID: "ps_missing",
+		Namespace:    "default",
+		PVCName:      "data",
+		ExpiresAt:    fixedNow().Add(time.Minute),
+	})
+
+	token, err := service.IssueToken(t.Context(), "vs_1", "owner")
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
+	if token.Token != "fb-token" || token.PodSessionID == "ps_missing" {
+		t.Fatalf("token = %#v", token)
+	}
+}
+
 func TestViewerServiceRejectsCrossUserSessionAccess(t *testing.T) {
 	t.Parallel()
 
@@ -316,6 +483,30 @@ func TestViewerServiceRejectsCrossUserSessionAccess(t *testing.T) {
 	}
 	if _, err := service.CloseViewerSessionForUser("vs_1", "other"); err == nil {
 		t.Fatal("CloseViewerSessionForUser() allowed another user")
+	}
+}
+
+func TestViewerServiceReturnsPodSessionNotFoundCode(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	service := NewViewerService(
+		cfg,
+		state.New(cfg.Cache),
+		kube.New(fake.NewSimpleClientset()),
+		nil,
+		nil,
+		observability.MustNew(cfg.Observability, nil),
+	)
+
+	_, err := service.GetPodSession("ps_missing")
+
+	var apiErr *apienv.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("GetPodSession() error = %T %v, want apienv.Error", err, err)
+	}
+	if apiErr.Code != apienv.CodePodSessionNotFound {
+		t.Fatalf("code = %s, want %s", apiErr.Code, apienv.CodePodSessionNotFound)
 	}
 }
 

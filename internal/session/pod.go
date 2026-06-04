@@ -13,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
@@ -141,18 +142,15 @@ func (s *PodService) EnsurePodSession(
 		return nil, err
 	}
 	if existing != nil {
-		session := s.rebuildPodSession(existing, input, now)
-		s.store.PutPodSession(session)
-		s.recorder.ObservePodSession("reused")
-		s.recorder.Logger().LogAttrs(ctx, slog.LevelInfo, "pod.session_rebuilt",
-			slog.String("pod_session_id", session.ID),
-			slog.String("namespace", session.Namespace),
-			slog.String("pod_name", session.PodName),
-			slog.String("pvc_name", session.PVCName),
-			slog.String("runtime_version", session.RuntimeVersion),
-			slog.String("status", session.Status),
+		if err := s.deletePodIfExists(ctx, existing.Namespace, existing.Name); err != nil {
+			return nil, err
+		}
+		s.recorder.ObserveCleanupDeleted()
+		s.recorder.Logger().LogAttrs(ctx, slog.LevelInfo, "pod.orphan_viewer_pod_deleted",
+			slog.String("namespace", existing.Namespace),
+			slog.String("pod_name", existing.Name),
+			slog.String("pvc_uid", input.PVCUID),
 		)
-		return session, nil
 	}
 
 	id, err := newID("ps")
@@ -185,6 +183,9 @@ func (s *PodService) EnsurePodSession(
 	pod := s.buildPod(podSession, input.MountInfo)
 	createdPod, err := s.client.CreatePod(ctx, pod)
 	if err != nil {
+		if apierrors.IsForbidden(err) {
+			return nil, apienv.NewError(403, apienv.CodeViewerPodFailed, err.Error(), nil)
+		}
 		return nil, err
 	}
 	owner := podOwnerReference(createdPod)
@@ -278,7 +279,6 @@ func (s *PodService) SyncPodStatus(
 	default:
 		updated.Status = domain.PodStatusCreating
 	}
-	s.store.PutPodSession(&updated)
 	s.recorder.Logger().LogAttrs(ctx, slog.LevelDebug, "pod.status_synced",
 		slog.String("pod_session_id", updated.ID),
 		slog.String("namespace", updated.Namespace),
@@ -381,13 +381,12 @@ func (s *PodService) ReconcileViewerPods(ctx context.Context, namespace string) 
 		"pod.reconcile_viewer_pods",
 		slog.String("namespace", namespace),
 	)
-	var scanned, rebuilt, deleted, skippedInvalid int
+	var scanned, deleted, skippedInvalid int
 	defer func() {
 		s.recorder.Logger().LogAttrs(ctx, slog.LevelDebug, "pod.reconcile_viewer_pods.result",
 			slog.String("namespace", namespace),
 			slog.String("runtime_version", s.runtimeVersion),
 			slog.Int("scanned", scanned),
-			slog.Int("rebuilt", rebuilt),
 			slog.Int("deleted", deleted),
 			slog.Int("skipped_invalid", skippedInvalid),
 		)
@@ -445,19 +444,11 @@ func (s *PodService) ReconcileViewerPods(ctx context.Context, namespace string) 
 			deleted++
 			continue
 		}
-		input := EnsurePodSessionInput{
-			Namespace:  pod.Namespace,
-			PVCName:    pod.Labels[labelPVCName],
-			PVCUID:     pod.Labels[labelPVCUID],
-			AccessMode: domain.AccessModeReadWriteMany,
-			Mode:       domain.ModeReadWrite,
-		}
-		session := s.rebuildPodSession(pod, input, now)
-		if err := s.ensurePodLifecycleAnnotations(ctx, session, pod.Annotations); err != nil {
+		if err := s.deletePodIfExists(ctx, pod.Namespace, pod.Name); err != nil {
 			return err
 		}
-		s.store.PutPodSession(session)
-		rebuilt++
+		s.recorder.ObserveCleanupDeleted()
+		deleted++
 	}
 	return nil
 }
@@ -469,29 +460,35 @@ func (s *PodService) viewerPodStillValid(pod *corev1.Pod, now time.Time) bool {
 	return now.Sub(pod.CreationTimestamp.Time) <= s.cfg.Sessions.RecoveryGrace
 }
 
-func (s *PodService) ensurePodLifecycleAnnotations(
-	ctx context.Context,
-	session *domain.PodSession,
-	current map[string]string,
-) error {
-	annotations := lifecycleAnnotations(session)
-	needsPatch := false
-	for key, value := range annotations {
-		if current[key] != value {
-			needsPatch = true
-			break
-		}
-	}
-	if !needsPatch {
-		return nil
-	}
-	_, err := s.client.PatchPodAnnotations(ctx, session.Namespace, session.PodName, annotations)
-	return err
-}
-
 func (s *PodService) deletePodIfExists(ctx context.Context, namespace string, name string) error {
 	if err := s.client.DeletePod(ctx, namespace, name); err != nil && !apierrors.IsNotFound(err) {
 		return err
+	}
+	return nil
+}
+
+func (s *PodService) DeleteViewerPodsBySessionID(
+	ctx context.Context,
+	namespace string,
+	podSessionID string,
+) error {
+	pods, err := s.client.ListViewerPods(ctx, namespace, map[string]string{
+		labelComponent:    componentViewer,
+		labelPodSessionID: podSessionID,
+	})
+	if err != nil {
+		return err
+	}
+	for i := range pods {
+		if err := s.deletePodIfExists(ctx, pods[i].Namespace, pods[i].Name); err != nil {
+			return err
+		}
+		s.recorder.ObserveCleanupDeleted()
+		s.recorder.Logger().LogAttrs(ctx, slog.LevelInfo, "pod.stale_viewer_pod_deleted",
+			slog.String("pod_session_id", podSessionID),
+			slog.String("namespace", pods[i].Namespace),
+			slog.String("pod_name", pods[i].Name),
+		)
 	}
 	return nil
 }
@@ -519,64 +516,6 @@ func (s *PodService) findExistingViewerPod(
 		return &pods[i], nil
 	}
 	return nil, nil
-}
-
-func (s *PodService) rebuildPodSession(
-	pod *corev1.Pod,
-	input EnsurePodSessionInput,
-	now time.Time,
-) *domain.PodSession {
-	id := pod.Labels[labelPodSessionID]
-	if id == "" {
-		id = strings.TrimPrefix(pod.Name, "viewer-")
-	}
-	viewerURL, _ := s.viewerURL(id)
-	status := domain.PodStatusCreating
-	if pod.Status.Phase == corev1.PodRunning && podReady(pod) {
-		status = domain.PodStatusReady
-	}
-	accessMode := input.AccessMode
-	if value := pod.Annotations[annotationAccessMode]; value != "" {
-		accessMode = value
-	}
-	mode := input.Mode
-	if value := pod.Annotations[annotationMode]; value != "" {
-		mode = value
-	}
-	createdAt := pod.CreationTimestamp.Time
-	if value, ok := parseAnnotationTime(pod.Annotations, annotationCreatedAt); ok {
-		createdAt = value
-	}
-	lastActiveAt := now
-	if value, ok := parseAnnotationTime(pod.Annotations, annotationLastActiveAt); ok {
-		lastActiveAt = value
-	}
-	expiresAt := now.Add(s.cfg.Sessions.PodKeepaliveGrace)
-	if value, ok := parseAnnotationTime(pod.Annotations, annotationKeepaliveUntil); ok {
-		expiresAt = value
-	}
-	runtimeVersion := pod.Annotations[annotationRuntimeVersion]
-	if runtimeVersion == "" {
-		runtimeVersion = pod.Labels[labelRuntimeVersion]
-	}
-	return &domain.PodSession{
-		ID:             id,
-		Namespace:      input.Namespace,
-		PVCName:        input.PVCName,
-		PVCUID:         input.PVCUID,
-		AccessMode:     accessMode,
-		Mode:           mode,
-		PodName:        pod.Name,
-		ServiceName:    pod.Name,
-		ViewerURL:      viewerURL,
-		RuntimeVersion: runtimeVersion,
-		Status:         status,
-		NodeName:       pod.Spec.NodeName,
-		CreatedAt:      createdAt,
-		UpdatedAt:      now,
-		LastActiveAt:   lastActiveAt,
-		ExpiresAt:      expiresAt,
-	}
 }
 
 func (s *PodService) buildPod(session *domain.PodSession, mountInfo *domain.PVCMountInfo) *corev1.Pod {

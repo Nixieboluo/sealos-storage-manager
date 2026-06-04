@@ -146,15 +146,6 @@ function appendRows(
 
 		const branch = branches[entry.path]
 		if (branch?.isLoading) {
-			if (rows.length >= state.maxRows) {
-				return
-			}
-			rows.push({
-				depth: entry.depth + 1,
-				id: `branch-loading:${entry.path}`,
-				kind: 'branch-loading',
-				path: entry.path,
-			})
 			continue
 		}
 

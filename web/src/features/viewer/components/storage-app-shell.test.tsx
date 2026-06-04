@@ -110,4 +110,44 @@ describe('storageAppShell', () => {
 
 		expect(await screen.findByText(/permission to access/i)).toBeInTheDocument()
 	})
+
+	it('stops restarting the viewer flow after token recovery is exhausted', async () => {
+		const user = userEvent.setup()
+		const createViewerSession = vi
+			.fn()
+			.mockResolvedValueOnce(viewerSessionFixture({
+				id: 'vs_old',
+				pod_session_id: 'ps_old',
+				status: 'ready',
+				token_ready: true,
+			}))
+			.mockResolvedValueOnce(viewerSessionFixture({
+				id: 'vs_new',
+				pod_session_id: 'ps_new',
+				status: 'ready',
+				token_ready: true,
+			}))
+		const issueViewerToken = vi.fn().mockRejectedValue(new ViewerApiError({
+			code: 'POD_SESSION_NOT_FOUND',
+			message: 'Pod session no longer exists',
+			status: 404,
+		}))
+		const api = createFakeViewerAPI({
+			createViewerSession,
+			issueViewerToken,
+			listPVCs: vi.fn().mockResolvedValue([
+				pvcFixture({ name: 'data', namespace: 'ns-admin', uid: 'uid-data' }),
+			]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: /browse files/i }))
+
+		await waitFor(() => expect(createViewerSession).toHaveBeenCalledTimes(2), { timeout: 3_000 })
+		await waitFor(() => expect(issueViewerToken).toHaveBeenCalledTimes(2), { timeout: 3_000 })
+		await waitFor(() => expect(screen.getByText(/pod session was lost/i)).toBeInTheDocument())
+		await new Promise(resolve => window.setTimeout(resolve, 100))
+		expect(createViewerSession).toHaveBeenCalledTimes(2)
+	})
 })

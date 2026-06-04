@@ -22,6 +22,7 @@ const (
 	CodePVCMountPending        Code = "PVC_MOUNT_PENDING"
 	CodeViewerPodCreating      Code = "VIEWER_POD_CREATING"
 	CodeViewerPodFailed        Code = "VIEWER_POD_FAILED"
+	CodePodSessionNotFound     Code = "POD_SESSION_NOT_FOUND"
 	CodeViewerSessionNotFound  Code = "VIEWER_SESSION_NOT_FOUND"
 	CodeViewerSessionExpired   Code = "VIEWER_SESSION_EXPIRED"
 	CodeAuthRequestExpired     Code = "AUTH_REQUEST_EXPIRED"
@@ -51,6 +52,7 @@ var AllCodes = [...]Code{
 	CodePVCMountPending,
 	CodeViewerPodCreating,
 	CodeViewerPodFailed,
+	CodePodSessionNotFound,
 	CodeViewerSessionNotFound,
 	CodeViewerSessionExpired,
 	CodeAuthRequestExpired,

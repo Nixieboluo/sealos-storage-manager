@@ -3,6 +3,7 @@ import type { ViewerAPI } from '@/features/viewer/types/viewer'
 import { queryOptions } from '@tanstack/react-query'
 
 import { viewerApi } from '@/features/viewer/api/viewer-api'
+import { isMissingSessionError } from '@/features/viewer/api/viewer-error'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
 
 interface ViewerSessionQueryOptionsInput {
@@ -47,6 +48,7 @@ export function viewerSessionQueryOptions({
 		enabled: enabled && viewerSessionID.length > 0,
 		refetchInterval: query =>
 			query.state.data?.status === 'creating' ? 2_000 : false,
+		retry: (_failureCount, error) => !isMissingSessionError(error),
 		staleTime: 2_000,
 	})
 }

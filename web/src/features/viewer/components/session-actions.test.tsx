@@ -44,4 +44,26 @@ describe('sessionActions', () => {
 		expect(await screen.findByText(/still using this pod session/i)).toBeInTheDocument()
 		expect(closePodSession).not.toHaveBeenCalled()
 	})
+
+	it('can discard stale local state when the backend session id is gone', async () => {
+		const user = userEvent.setup()
+		const closePodSession = vi.fn().mockResolvedValue({})
+		const onManualClose = vi.fn()
+		const api = createFakeViewerAPI({ closePodSession })
+
+		renderWithProviders(
+			<SessionActions
+				api={api}
+				canDiscardLocalState
+				onManualClose={onManualClose}
+				podSessionID={null}
+				viewerSessionID={null}
+			/>,
+		)
+
+		await user.click(screen.getByRole('button', { name: /close pod session/i }))
+
+		expect(closePodSession).not.toHaveBeenCalled()
+		expect(onManualClose).toHaveBeenCalledWith('pod')
+	})
 })

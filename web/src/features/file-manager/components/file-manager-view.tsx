@@ -17,6 +17,7 @@ import {
 	File,
 	Folder,
 	FolderPlus,
+	Loader2,
 	RefreshCw,
 	Trash2,
 	Upload,
@@ -46,6 +47,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { invalidateFileTreeQueries } from '@/features/file-manager/api/file-manager-cache'
 import {
 	createFolderMutationOptions,
@@ -207,6 +209,21 @@ export function FileManagerView({
 		})
 	}, [operationsDisabled, session, treeScope])
 
+	const [editingEntry, setEditingEntry] = useState<FileEntry | null>(null)
+	const openEntry = useCallback((entry: FileEntry) => {
+		if (entry.isDir) {
+			onPathChange(entry.path)
+			return
+		}
+		if (isEditableFile(entry.path)) {
+			if (entry.size > maxEditableFileBytes) {
+				toast.error(t('files.editorTooLarge', { size: formatBytes(maxEditableFileBytes) }))
+				return
+			}
+			setEditingEntry(entry)
+		}
+	}, [onPathChange, t])
+
 	const rows = useMemo(
 		() => buildFileTableRows(entries, expandedPaths, branches),
 		[branches, entries, expandedPaths],
@@ -219,6 +236,8 @@ export function FileManagerView({
 				<FileNameCell
 					disabled={operationsDisabled}
 					isExpanded={info.row.original.kind === 'resource' && expandedPaths.has(info.row.original.entry.path)}
+					isLoading={info.row.original.kind === 'resource' && Boolean(branches[info.row.original.entry.path]?.isLoading)}
+					onOpen={entry => openEntry(entry)}
 					onRetryBranch={(path) => {
 						if (session) {
 							invalidateFileTreeQueries(queryClient, session, [path])
@@ -242,7 +261,7 @@ export function FileManagerView({
 		{
 			accessorFn: row => row.kind === 'resource' ? row.entry.size : 0,
 			cell: info => info.row.original.kind === 'resource'
-				? info.row.original.entry.isDir ? '-' : formatBytes(info.row.original.entry.size)
+				? <span className="block truncate">{info.row.original.entry.isDir ? '-' : formatBytes(info.row.original.entry.size)}</span>
 				: '',
 			header: () => (
 				<SortableHead
@@ -257,7 +276,9 @@ export function FileManagerView({
 		},
 		{
 			accessorFn: row => row.kind === 'resource' ? row.entry.modified : '',
-			cell: info => info.row.original.kind === 'resource' ? info.row.original.entry.modified || '-' : '',
+			cell: info => info.row.original.kind === 'resource'
+				? <ModifiedTimeCell value={info.row.original.entry.modified} />
+				: '',
 			header: () => (
 				<SortableHead
 					active={sort.field === 'modified'}
@@ -283,7 +304,7 @@ export function FileManagerView({
 			header: () => <span>{t('files.columns.actions')}</span>,
 			id: 'actions',
 		},
-	], [expandedPaths, operationsDisabled, onPathChange, queryClient, session, setSort, sort, t, toggleFolder])
+	], [branches, expandedPaths, onPathChange, openEntry, operationsDisabled, queryClient, session, setSort, sort, t, toggleFolder])
 
 	const table = useReactTable({
 		columns,
@@ -377,12 +398,18 @@ export function FileManagerView({
 							</div>
 
 							<div className="relative min-h-0 rounded-lg border bg-card">
-								<Table>
+								<Table className="table-fixed">
+									<colgroup>
+										<col className="w-[52%]" />
+										<col className="w-28" />
+										<col className="w-44" />
+										<col className="w-36" />
+									</colgroup>
 									<TableHeader>
 										{table.getHeaderGroups().map(headerGroup => (
 											<TableRow key={headerGroup.id}>
 												{headerGroup.headers.map(header => (
-													<TableHead className={header.id === 'actions' ? 'text-right' : undefined} key={header.id}>
+													<TableHead className={tableColumnClassName(header.id)} key={header.id}>
 														{header.isPlaceholder
 															? null
 															: flexRender(header.column.columnDef.header, header.getContext())}
@@ -418,7 +445,7 @@ export function FileManagerView({
 										{table.getRowModel().rows.map(row => (
 											<TableRow key={row.id}>
 												{row.getVisibleCells().map(cell => (
-													<TableCell className={cell.column.id === 'actions' ? 'text-right' : undefined} key={cell.id}>
+													<TableCell className={tableColumnClassName(cell.column.id)} key={cell.id}>
 														{flexRender(cell.column.columnDef.cell, cell.getContext())}
 													</TableCell>
 												))}
@@ -451,6 +478,20 @@ export function FileManagerView({
 					)}
 
 			<UploadTaskList />
+			{session && editingEntry
+				? (
+						<FileEditorDialog
+							entry={editingEntry}
+							onOpenChange={(open) => {
+								if (!open) {
+									setEditingEntry(null)
+								}
+							}}
+							open={true}
+							session={session}
+						/>
+					)
+				: null}
 		</section>
 	)
 }
@@ -505,6 +546,19 @@ function UploadTaskRow({ taskID }: UploadTaskRowProps) {
 	)
 }
 
+function tableColumnClassName(id: string) {
+	switch (id) {
+		case 'actions':
+			return 'w-36 text-right'
+		case 'modified':
+			return 'w-44'
+		case 'size':
+			return 'w-28'
+		default:
+			return 'min-w-0'
+	}
+}
+
 interface SortableHeadProps {
 	active: boolean
 	direction: 'asc' | 'desc'
@@ -522,9 +576,34 @@ function SortableHead({ active, direction, disabled, label, onClick }: SortableH
 	)
 }
 
+interface ModifiedTimeCellProps {
+	value: string
+}
+
+function ModifiedTimeCell({ value }: ModifiedTimeCellProps) {
+	const formatted = formatFileModifiedTime(value)
+	if (!formatted) {
+		return <span>-</span>
+	}
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<time className="block truncate text-sm" dateTime={value} title={formatted.long}>
+					{formatted.short}
+				</time>
+			</TooltipTrigger>
+			<TooltipContent>
+				<time dateTime={value}>{formatted.long}</time>
+			</TooltipContent>
+		</Tooltip>
+	)
+}
+
 interface FileNameCellProps {
 	disabled: boolean
 	isExpanded: boolean
+	isLoading: boolean
+	onOpen: (entry: FileEntry) => void
 	onRetryBranch: (path: string) => void
 	onToggleFolder: (entry: FileEntry) => void
 	row: FileTableRow
@@ -533,20 +612,13 @@ interface FileNameCellProps {
 function FileNameCell({
 	disabled,
 	isExpanded,
+	isLoading,
+	onOpen,
 	onRetryBranch,
 	onToggleFolder,
 	row,
 }: FileNameCellProps) {
 	const { t } = useTranslation()
-
-	if (row.kind === 'branch-loading') {
-		return (
-			<div className="flex min-w-0 items-center gap-2 text-muted-foreground" style={{ paddingLeft: `${row.depth * 16}px` }}>
-				<span className="size-4" />
-				<span>{t('files.pending')}</span>
-			</div>
-		)
-	}
 
 	if (row.kind === 'branch-error') {
 		return (
@@ -560,8 +632,9 @@ function FileNameCell({
 	}
 
 	const entry = row.entry
+	const canOpen = entry.isDir || isEditableFile(entry.path)
 	return (
-		<div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: `${entry.depth * 16}px` }}>
+		<div className="flex w-full min-w-0 items-center gap-2" style={{ paddingLeft: `${entry.depth * 16}px` }}>
 			{entry.isDir
 				? (
 						<Button
@@ -571,17 +644,31 @@ function FileNameCell({
 							size="icon"
 							variant="ghost"
 						>
-							{isExpanded ? <ChevronDown /> : <ChevronRight />}
+							{isLoading ? <Loader2 className="animate-spin" /> : isExpanded ? <ChevronDown /> : <ChevronRight />}
 						</Button>
 					)
 				: <span className="size-9" />}
 			<div className="flex size-8 items-center justify-center rounded-md border bg-muted text-muted-foreground">
 				{entry.isDir ? <Folder /> : <File />}
 			</div>
-			<div className="min-w-0">
-				<div className="truncate font-medium">{entry.name}</div>
-				<div className="truncate font-mono text-xs text-muted-foreground">{entry.path}</div>
-			</div>
+			{canOpen
+				? (
+						<button
+							className="group min-w-0 flex-1 cursor-pointer text-left disabled:cursor-not-allowed disabled:opacity-50"
+							disabled={disabled}
+							onClick={() => onOpen(entry)}
+							type="button"
+						>
+							<span className="block truncate font-medium group-hover:underline">{entry.name}</span>
+							<span className="block truncate font-mono text-xs text-muted-foreground group-hover:underline">{entry.path}</span>
+						</button>
+					)
+				: (
+						<div className="min-w-0 flex-1">
+							<div className="truncate font-medium">{entry.name}</div>
+							<div className="truncate font-mono text-xs text-muted-foreground">{entry.path}</div>
+						</div>
+					)}
 		</div>
 	)
 }
@@ -595,28 +682,10 @@ interface FileActionsProps {
 
 function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProps) {
 	const { t } = useTranslation()
+	const queryClient = useQueryClient()
 	const [editing, setEditing] = useState(false)
 	const [deleting, setDeleting] = useState(false)
-	const queryClient = useQueryClient()
-	const textQuery = useQuery(fileTextQueryOptions(session, editing ? entry.path : null))
-	const [editorContent, setEditorContent] = useState('')
-	const [isEditorDirty, setIsEditorDirty] = useState(false)
-	const saveMutation = useMutation(saveFileTextMutationOptions(queryClient, session))
 	const deleteMutation = useMutation(moveToRecycleBinMutationOptions(queryClient, session))
-	const editorValue = isEditorDirty ? editorContent : (textQuery.data ?? editorContent)
-
-	const saveFile = useCallback(() => {
-		saveMutation.mutate({
-			content: editorValue,
-			path: entry.path,
-		}, {
-			onSuccess: () => {
-				toast.success(t('files.saved'))
-				setEditing(false)
-			},
-			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
-		})
-	}, [editorValue, entry.path, saveMutation, t])
 
 	const deleteFile = useCallback(() => {
 		deleteMutation.mutate({
@@ -632,25 +701,14 @@ function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProp
 		})
 	}, [deleteMutation, entry.isDir, entry.path, entry.size, t])
 
-	function download() {
-		const anchor = document.createElement('a')
-		anchor.href = session.client.downloadUrl(entry.path)
-		anchor.download = entry.name
-		anchor.rel = 'noreferrer'
-		anchor.click()
-	}
-
 	function openEditor() {
 		if (entry.size > maxEditableFileBytes) {
 			toast.error(t('files.editorTooLarge', { size: formatBytes(maxEditableFileBytes) }))
 			return
 		}
 		setEditing(true)
-		setEditorContent(textQuery.data ?? '')
-		setIsEditorDirty(false)
 	}
 
-	const isSaving = saveMutation.isPending
 	const canEdit = !entry.isDir && isEditableFile(entry.path)
 
 	return (
@@ -669,7 +727,7 @@ function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProp
 							</Button>
 						)
 					: (
-							<Button aria-label={t('files.download')} disabled={disabled} onClick={download} size="icon" variant="ghost">
+							<Button aria-label={t('files.download')} disabled={disabled} onClick={() => downloadEntry(session, entry)} size="icon" variant="ghost">
 								<Download />
 							</Button>
 						)}
@@ -685,63 +743,12 @@ function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProp
 				</Button>
 			</div>
 
-			<Dialog onOpenChange={open => !isSaving && setEditing(open)} open={editing}>
-				<DialogContent className="sm:max-w-4xl" showCloseButton={!isSaving}>
-					<DialogHeader>
-						<DialogTitle>{t('files.editorTitle')}</DialogTitle>
-						<DialogDescription>{entry.name}</DialogDescription>
-					</DialogHeader>
-					{isSaving
-						? (
-								<ModalStatus
-									description={t('files.savingDescription')}
-									title={t('files.savingTitle')}
-								/>
-							)
-						: null}
-					<div className="overflow-hidden rounded-md border">
-						{!textQuery.isError
-							? (
-									<Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t('common.loading')}</div>}>
-										<MonacoEditor
-											height="28rem"
-											language={editorLanguage(entry.path)}
-											loading={t('common.loading')}
-											onChange={(value) => {
-												setEditorContent(value ?? '')
-												setIsEditorDirty(true)
-											}}
-											options={{
-												fontSize: 13,
-												minimap: { enabled: false },
-												readOnly: isSaving || textQuery.isLoading,
-												scrollBeyondLastLine: false,
-												wordWrap: 'on',
-											}}
-											value={textQuery.isLoading ? '' : editorValue}
-										/>
-									</Suspense>
-								)
-							: (
-									<div className="p-4 text-sm text-destructive">
-										{textQuery.error instanceof Error ? textQuery.error.message : t('errors.generic')}
-									</div>
-								)}
-					</div>
-					<DialogFooter>
-						<Button disabled={isSaving} onClick={() => setEditing(false)} type="button" variant="outline">
-							{t('actions.cancel')}
-						</Button>
-						<Button
-							disabled={isSaving || textQuery.isLoading || textQuery.isError}
-							onClick={saveFile}
-							type="button"
-						>
-							{t('actions.save')}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			<FileEditorDialog
+				entry={entry}
+				onOpenChange={setEditing}
+				open={editing}
+				session={session}
+			/>
 
 			<Dialog onOpenChange={setDeleting} open={deleting}>
 				<DialogContent>
@@ -764,6 +771,106 @@ function FileActions({ disabled, entry, onOpenFolder, session }: FileActionsProp
 				</DialogContent>
 			</Dialog>
 		</>
+	)
+}
+
+interface FileEditorDialogProps {
+	entry: FileEntry
+	onOpenChange: (open: boolean) => void
+	open: boolean
+	session: FileBrowserSession
+}
+
+function FileEditorDialog({ entry, onOpenChange, open, session }: FileEditorDialogProps) {
+	const { t } = useTranslation()
+	const queryClient = useQueryClient()
+	const textQuery = useQuery(fileTextQueryOptions(session, open ? entry.path : null))
+	const [editorState, setEditorState] = useState(() => ({
+		content: '',
+		dirty: false,
+		path: entry.path,
+	}))
+	const saveMutation = useMutation(saveFileTextMutationOptions(queryClient, session))
+	const isCurrentEditorState = editorState.path === entry.path
+	const editorContent = isCurrentEditorState ? editorState.content : ''
+	const isEditorDirty = isCurrentEditorState && editorState.dirty
+	const editorValue = isEditorDirty ? editorContent : (textQuery.data ?? editorContent)
+	const isSaving = saveMutation.isPending
+
+	const saveFile = useCallback(() => {
+		saveMutation.mutate({
+			content: editorValue,
+			path: entry.path,
+		}, {
+			onSuccess: () => {
+				toast.success(t('files.saved'))
+				onOpenChange(false)
+			},
+			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
+		})
+	}, [editorValue, entry.path, onOpenChange, saveMutation, t])
+
+	return (
+		<Dialog onOpenChange={nextOpen => !isSaving && onOpenChange(nextOpen)} open={open}>
+			<DialogContent className="sm:max-w-4xl" showCloseButton={!isSaving}>
+				<DialogHeader>
+					<DialogTitle>{t('files.editorTitle')}</DialogTitle>
+					<DialogDescription>{entry.name}</DialogDescription>
+				</DialogHeader>
+				{isSaving
+					? (
+							<ModalStatus
+								description={t('files.savingDescription')}
+								title={t('files.savingTitle')}
+							/>
+						)
+					: null}
+				<div className="overflow-hidden rounded-md border">
+					{!textQuery.isError
+						? (
+								<Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t('common.loading')}</div>}>
+									<MonacoEditor
+										height="28rem"
+										language={editorLanguage(entry.path)}
+										loading={t('common.loading')}
+										onChange={(value) => {
+											setEditorState({
+												content: value ?? '',
+												dirty: true,
+												path: entry.path,
+											})
+										}}
+										options={{
+											fontSize: 13,
+											minimap: { enabled: false },
+											readOnly: isSaving || textQuery.isLoading,
+											scrollBeyondLastLine: false,
+											wordWrap: 'on',
+										}}
+										value={textQuery.isLoading ? '' : editorValue}
+									/>
+								</Suspense>
+							)
+						: (
+								<div className="p-4 text-sm text-destructive">
+									{textQuery.error instanceof Error ? textQuery.error.message : t('errors.generic')}
+								</div>
+							)}
+				</div>
+				<DialogFooter>
+					<Button disabled={isSaving} onClick={() => onOpenChange(false)} type="button" variant="outline">
+						{t('actions.cancel')}
+					</Button>
+					<Button
+						disabled={isSaving || textQuery.isLoading || textQuery.isError}
+						onClick={saveFile}
+						type="button"
+					>
+						{t('actions.save')}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
 	)
 }
 
@@ -844,6 +951,7 @@ function UploadDialog({
 	const queryClient = useQueryClient()
 	const [open, setOpen] = useState(false)
 	const [file, setFile] = useState<File | null>(null)
+	const [targetPath, setTargetPath] = useState(currentPath)
 	const [activeTaskID, setActiveTaskID] = useState<string | null>(null)
 	const inputRef = useRef<HTMLInputElement | null>(null)
 	const mutation = useMutation(uploadFileMutationOptions(queryClient, session))
@@ -861,11 +969,12 @@ function UploadDialog({
 
 	const resetDialogState = useCallback(() => {
 		setFile(null)
+		setTargetPath(currentPath)
 		setActiveTaskID(null)
 		if (inputRef.current) {
 			inputRef.current.value = ''
 		}
-	}, [])
+	}, [currentPath])
 
 	const openUploadDialog = useCallback(() => {
 		resetDialogState()
@@ -879,7 +988,7 @@ function UploadDialog({
 		const taskID = createUploadTaskID(file.name)
 		setActiveTaskID(taskID)
 		mutation.mutate({
-			currentPath,
+			currentPath: targetPath,
 			file,
 			podSessionID: podSessionID ?? undefined,
 			taskID,
@@ -892,7 +1001,7 @@ function UploadDialog({
 			},
 			onError: error => toast.error(error instanceof Error ? error.message : t('errors.generic')),
 		})
-	}, [currentPath, file, mutation, podSessionID, resetDialogState, t, viewerSessionID])
+	}, [file, mutation, podSessionID, resetDialogState, t, targetPath, viewerSessionID])
 
 	return (
 		<>
@@ -915,7 +1024,7 @@ function UploadDialog({
 				<DialogContent showCloseButton={!isUploading}>
 					<DialogHeader>
 						<DialogTitle>{t('files.upload')}</DialogTitle>
-						<DialogDescription>{currentPath}</DialogDescription>
+						<DialogDescription>{t('files.uploadTargetDescription')}</DialogDescription>
 					</DialogHeader>
 					{isUploading
 						? (
@@ -933,6 +1042,12 @@ function UploadDialog({
 						type="file"
 					/>
 					<div className="grid gap-3">
+						<UploadPathPicker
+							disabled={isUploading}
+							onTargetPathChange={setTargetPath}
+							session={session}
+							targetPath={targetPath}
+						/>
 						<Button disabled={isUploading} onClick={() => inputRef.current?.click()} type="button" variant="outline">
 							{t('files.chooseFile')}
 						</Button>
@@ -982,6 +1097,100 @@ function UploadDialog({
 	)
 }
 
+interface UploadPathPickerProps {
+	disabled: boolean
+	onTargetPathChange: (path: string) => void
+	session: FileBrowserSession | null
+	targetPath: string
+}
+
+function UploadPathPicker({
+	disabled,
+	onTargetPathChange,
+	session,
+	targetPath,
+}: UploadPathPickerProps) {
+	const { t } = useTranslation()
+	const [browsePath, setBrowsePath] = useState(targetPath)
+	const folderQuery = useQuery(fileListQueryOptions(
+		session,
+		browsePath,
+		{ field: 'name', direction: 'asc' },
+		!disabled,
+	))
+	const directories = folderQuery.data?.entries.filter(entry => entry.isDir) ?? emptyEntries
+
+	const choosePath = useCallback((path: string) => {
+		setBrowsePath(path)
+		onTargetPathChange(path)
+	}, [onTargetPathChange])
+
+	return (
+		<div className="grid gap-2">
+			<Label>{t('files.uploadTarget')}</Label>
+			<div className="rounded-md border">
+				<div className="flex items-center gap-2 border-b px-3 py-2">
+					<Button
+						aria-label={t('files.up')}
+						disabled={disabled || browsePath === '/'}
+						onClick={() => choosePath(parentPath(browsePath))}
+						size="icon"
+						type="button"
+						variant="ghost"
+					>
+						<ArrowLeft />
+					</Button>
+					<button
+						className="min-w-0 flex-1 rounded-sm px-2 py-1 text-left font-mono text-xs hover:bg-muted disabled:pointer-events-none disabled:opacity-60"
+						disabled={disabled}
+						onClick={() => onTargetPathChange(browsePath)}
+						type="button"
+					>
+						<span className="block truncate">{targetPath}</span>
+					</button>
+				</div>
+				<div className="max-h-40 overflow-auto p-1">
+					{folderQuery.isLoading || folderQuery.isFetching
+						? (
+								<div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+									<Loader2 className="size-4 animate-spin" />
+									<span>{t('files.pending')}</span>
+								</div>
+							)
+						: null}
+					{folderQuery.error
+						? (
+								<div className="px-2 py-2 text-sm text-destructive">
+									{folderQuery.error instanceof Error ? folderQuery.error.message : t('errors.generic')}
+								</div>
+							)
+						: null}
+					{!folderQuery.isLoading && !folderQuery.isFetching && !folderQuery.error && directories.length === 0
+						? (
+								<div className="px-2 py-2 text-sm text-muted-foreground">{t('files.noFolders')}</div>
+							)
+						: null}
+					{directories.map(entry => (
+						<button
+							className={cn(
+								'flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-2 text-left text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-60',
+								targetPath === entry.path && 'bg-muted',
+							)}
+							disabled={disabled}
+							key={entry.path}
+							onClick={() => choosePath(entry.path)}
+							type="button"
+						>
+							<Folder className="size-4 shrink-0 text-muted-foreground" />
+							<span className="truncate">{entry.name}</span>
+						</button>
+					))}
+				</div>
+			</div>
+		</div>
+	)
+}
+
 interface ModalStatusProps {
 	description: string
 	title: string
@@ -1021,6 +1230,34 @@ function editorLanguage(path: string) {
 		default:
 			return 'plaintext'
 	}
+}
+
+function formatFileModifiedTime(value: string) {
+	if (!value) {
+		return null
+	}
+	const date = new Date(value)
+	if (Number.isNaN(date.getTime())) {
+		return null
+	}
+	return {
+		long: new Intl.DateTimeFormat(undefined, {
+			dateStyle: 'full',
+			timeStyle: 'long',
+		}).format(date),
+		short: new Intl.DateTimeFormat(undefined, {
+			dateStyle: 'medium',
+			timeStyle: 'short',
+		}).format(date),
+	}
+}
+
+function downloadEntry(session: FileBrowserSession, entry: FileEntry) {
+	const anchor = document.createElement('a')
+	anchor.href = session.client.downloadUrl(entry.path)
+	anchor.download = entry.name
+	anchor.rel = 'noreferrer'
+	anchor.click()
 }
 
 function hasPendingBranches(branches: Record<string, BranchState | undefined>) {

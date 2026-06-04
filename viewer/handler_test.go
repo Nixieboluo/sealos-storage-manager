@@ -36,6 +36,7 @@ type fakeViewerService struct {
 	heartbeat      *domain.Heartbeat
 	closed         *domain.ViewerSession
 	podSession     *domain.PodSession
+	podSessionErr  error
 }
 
 const testKubeconfig = `apiVersion: v1
@@ -106,6 +107,9 @@ func (f *fakeViewerService) CloseViewerSessionForUser(_ string, _ string) (*doma
 }
 
 func (f *fakeViewerService) GetPodSession(_ string) (*domain.PodSession, error) {
+	if f.podSessionErr != nil {
+		return nil, f.podSessionErr
+	}
 	return f.podSession, nil
 }
 
@@ -460,6 +464,8 @@ func TestHandlerIssueTokenNoStore(t *testing.T) {
 			created: &domain.ViewerSession{
 				ID:           "vs_1",
 				PodSessionID: "ps_1",
+				Namespace:    "ns",
+				PVCName:      "data",
 			},
 			token: &domain.ViewerToken{
 				ViewerSessionID: "vs_1",
@@ -493,6 +499,43 @@ func TestHandlerIssueTokenNoStore(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "kubeconfig") {
 		t.Fatalf("body leaked sensitive data: %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerIssueTokenAuthorizesFromViewerSessionPVC(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{
+			created: &domain.ViewerSession{
+				ID:           "vs_1",
+				PodSessionID: "ps_missing",
+				Namespace:    "ns",
+				PVCName:      "data",
+			},
+			token: &domain.ViewerToken{
+				ViewerSessionID: "vs_1",
+				PodSessionID:    "ps_missing",
+				Token:           "fb-token",
+				TokenType:       "Bearer",
+				ExpiresAt:       time.Now().Add(time.Minute),
+			},
+			podSessionErr: apienv.NewError(404, apienv.CodePodSessionNotFound, "Pod session no longer exists", nil),
+		},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+	)
+	req := httptest.NewRequest(http.MethodPost, "/api/viewer-sessions/vs_1/token", nil)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.IssueToken(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -543,6 +586,9 @@ func TestToEncoreErrorPreservesBusinessCodeAndRetryableStatus(t *testing.T) {
 	}
 	if details.Code != apienv.CodeFileBrowserLoginFailed {
 		t.Fatalf("business code = %s", details.Code)
+	}
+	if details.Message != "File Browser login failed" {
+		t.Fatalf("message = %q", details.Message)
 	}
 }
 

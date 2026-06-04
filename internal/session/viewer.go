@@ -14,7 +14,7 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/state"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -163,7 +163,7 @@ func (s *ViewerService) CreatePVC(ctx context.Context, input CreatePVCInput) (pv
 	if strings.TrimSpace(input.StorageClassName) != "" {
 		storageClassName := strings.TrimSpace(input.StorageClassName)
 		if _, err := s.kube.GetStorageClass(ctx, storageClassName); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				return nil, apienv.NewError(404, apienv.CodeStorageClassNotFound, "StorageClass not found", nil)
 			}
 			return nil, err
@@ -172,7 +172,7 @@ func (s *ViewerService) CreatePVC(ctx context.Context, input CreatePVCInput) (pv
 	}
 	created, err := s.kube.CreatePVC(ctx, pvcSpec)
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			return nil, apienv.NewError(409, apienv.CodePVCAlreadyExists, "PVC already exists", nil)
 		}
 		return nil, err
@@ -192,7 +192,7 @@ func (s *ViewerService) DeletePVC(ctx context.Context, input DeletePVCInput) (pv
 
 	current, err := s.kube.GetPVC(ctx, input.Namespace, input.Name)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
 		}
 		return nil, err
@@ -211,7 +211,7 @@ func (s *ViewerService) DeletePVC(ctx context.Context, input DeletePVCInput) (pv
 		return nil, err
 	}
 	if err := s.kube.DeletePVC(ctx, input.Namespace, input.Name); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
 		}
 		return nil, err
@@ -235,7 +235,7 @@ func (s *ViewerService) ExpandPVC(ctx context.Context, input ExpandPVCInput) (pv
 	}
 	current, err := s.kube.GetPVC(ctx, input.Namespace, input.Name)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
 		}
 		return nil, err
@@ -302,7 +302,10 @@ func (s *ViewerService) CreateViewerSession(
 
 	pvc, err := s.kube.GetPVC(ctx, input.Namespace, input.PVCName)
 	if err != nil {
-		return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		if apierrors.IsNotFound(err) {
+			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		}
+		return nil, err
 	}
 	accessModes := make([]string, 0, len(pvc.Spec.AccessModes))
 	for _, mode := range pvc.Spec.AccessModes {
@@ -343,6 +346,8 @@ func (s *ViewerService) CreateViewerSession(
 	viewer = &domain.ViewerSession{
 		ID:              id,
 		PodSessionID:    podSession.ID,
+		Namespace:       input.Namespace,
+		PVCName:         pvc.Name,
 		UserID:          input.UserID,
 		Username:        id,
 		Permission:      viewerMode,
@@ -431,6 +436,22 @@ func (s *ViewerService) IssueToken(
 		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Viewer session belongs to another user", nil)
 	}
 	pod, ok := s.store.GetPodSession(viewer.PodSessionID, now)
+	if !ok && s.pods != nil {
+		if replacement, err := s.replaceMissingPodSessionForViewer(ctx, viewer); err == nil {
+			pod = replacement
+			ok = true
+			viewer.PodSessionID = replacement.ID
+			viewer.PodStatus = replacement.Status
+			viewer.Status = statusFromPod(replacement.Status)
+			viewer.ViewerURL = replacement.ViewerURL
+			viewer.Mode = replacement.Mode
+			viewer.Reason = replacement.Reason
+			viewer.TokenReady = replacement.Status == domain.PodStatusReady
+			s.store.PutViewerSession(viewer)
+		} else {
+			return nil, err
+		}
+	}
 	if ok && s.pods != nil {
 		synced, err := s.pods.SyncPodStatus(ctx, pod)
 		if err == nil {
@@ -441,6 +462,45 @@ func (s *ViewerService) IssueToken(
 		return nil, apienv.NewError(409, apienv.CodeViewerPodCreating, "Viewer pod is not ready", nil)
 	}
 	return s.auth.IssueToken(ctx, viewer, pod)
+}
+
+func (s *ViewerService) replaceMissingPodSessionForViewer(
+	ctx context.Context,
+	viewer *domain.ViewerSession,
+) (*domain.PodSession, error) {
+	if viewer.Namespace == "" || viewer.PVCName == "" {
+		return nil, apienv.NewError(404, apienv.CodePodSessionNotFound, "Pod session no longer exists", nil)
+	}
+	pvc, err := s.kube.GetPVC(ctx, viewer.Namespace, viewer.PVCName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
+		}
+		return nil, err
+	}
+	accessModes := make([]string, 0, len(pvc.Spec.AccessModes))
+	for _, mode := range pvc.Spec.AccessModes {
+		accessModes = append(accessModes, string(mode))
+	}
+	supported, viewerMode, reason := kube.ViewerSupportForAccessModes(accessModes)
+	if !supported {
+		return nil, apienv.NewError(400, apienv.CodeUnsupportedAccessMode, reason, nil)
+	}
+	mountInfo, err := s.detectPVCMounts(ctx, viewer.Namespace, viewer.PVCName)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.pods.DeleteViewerPodsBySessionID(ctx, viewer.Namespace, viewer.PodSessionID); err != nil {
+		return nil, err
+	}
+	return s.pods.EnsurePodSession(ctx, EnsurePodSessionInput{
+		Namespace:  viewer.Namespace,
+		PVCName:    pvc.Name,
+		PVCUID:     string(pvc.UID),
+		AccessMode: primaryAccessMode(accessModes),
+		Mode:       viewerMode,
+		MountInfo:  mountInfo,
+	})
 }
 
 func (s *ViewerService) Heartbeat(ctx context.Context, id string) (*domain.Heartbeat, error) {
@@ -459,12 +519,8 @@ func (s *ViewerService) HeartbeatForUser(ctx context.Context, id string, userID 
 	viewer.LastHeartbeatAt = now
 	viewer.ExpiresAt = now.Add(s.cfg.Sessions.ViewerSessionTimout)
 	s.store.PutViewerSession(viewer)
-	if pod, ok := s.store.GetPodSession(viewer.PodSessionID, now); ok {
-		pod.LastActiveAt = now
-		pod.ExpiresAt = now.Add(s.cfg.Sessions.PodKeepaliveGrace)
-		if s.pods == nil {
-			s.store.PutPodSession(pod)
-		} else if _, err := s.pods.RefreshPodSessionKeepalive(ctx, pod); err != nil {
+	if pod, ok := s.store.GetPodSession(viewer.PodSessionID, now); ok && s.pods != nil {
+		if _, err := s.pods.RefreshPodSessionKeepalive(ctx, pod); err != nil {
 			return nil, err
 		}
 	}
@@ -499,7 +555,7 @@ func (s *ViewerService) CloseViewerSessionForUser(id string, userID string) (*do
 func (s *ViewerService) GetPodSession(id string) (*domain.PodSession, error) {
 	pod, ok := s.store.GetPodSession(id, s.now())
 	if !ok {
-		return nil, apienv.NewError(404, apienv.CodeViewerSessionNotFound, "Pod session no longer exists", nil)
+		return nil, apienv.NewError(404, apienv.CodePodSessionNotFound, "Pod session no longer exists", nil)
 	}
 	return pod, nil
 }
@@ -584,12 +640,12 @@ func capacityQuantity(capacity string, capacityBytes int64) (resource.Quantity, 
 			return resource.Quantity{}, err
 		}
 		if quantity.Sign() <= 0 {
-			return resource.Quantity{}, errors.NewBadRequest("capacity must be positive")
+			return resource.Quantity{}, apierrors.NewBadRequest("capacity must be positive")
 		}
 		return quantity, nil
 	}
 	if capacityBytes <= 0 {
-		return resource.Quantity{}, errors.NewBadRequest("capacity must be positive")
+		return resource.Quantity{}, apierrors.NewBadRequest("capacity must be positive")
 	}
 	return *resource.NewQuantity(capacityBytes, resource.BinarySI), nil
 }
@@ -608,7 +664,7 @@ func persistentVolumeAccessModes(input []string) ([]corev1.PersistentVolumeAcces
 		case domain.AccessModeReadWriteMany:
 			accessModes = append(accessModes, corev1.ReadWriteMany)
 		default:
-			return nil, errors.NewBadRequest("unsupported access mode")
+			return nil, apierrors.NewBadRequest("unsupported access mode")
 		}
 	}
 	return accessModes, nil

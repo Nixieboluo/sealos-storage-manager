@@ -47,6 +47,8 @@ type PodSession struct {
 type ViewerSession struct {
 	ID              string    `json:"id"`
 	PodSessionID    string    `json:"pod_session_id"`
+	Namespace       string    `json:"namespace"`
+	PVCName         string    `json:"pvc_name"`
 	UserID          string    `json:"-"`
 	Username        string    `json:"-"`
 	Permission      string    `json:"-"`

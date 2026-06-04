@@ -6,7 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
 
 import { viewerApi } from '@/features/viewer/api/viewer-api'
-import { normalizeViewerError } from '@/features/viewer/api/viewer-error'
+import { isMissingSessionError, normalizeViewerError } from '@/features/viewer/api/viewer-error'
 import {
 	createViewerSessionMutationOptions,
 	issueViewerTokenMutationOptions,
@@ -17,6 +17,7 @@ type FlowStatus = 'idle' | 'creating' | 'polling' | 'issuing-token' | 'ready' | 
 
 interface UseViewerSessionFlowInput {
 	api?: ViewerAPI
+	maxAutoRecoveries?: number
 	pollIntervalMs?: number
 }
 
@@ -42,8 +43,13 @@ function isTerminalFailureStatus(status: ViewerSession['status']) {
 	return status === 'failed' || status === 'expired' || status === 'closed'
 }
 
+function shouldRecoverSession(error: ViewerApiError) {
+	return isMissingSessionError(error)
+}
+
 export function useViewerSessionFlow({
 	api = viewerApi,
+	maxAutoRecoveries = 1,
 	pollIntervalMs = 2_000,
 }: UseViewerSessionFlowInput = {}): ViewerSessionFlow {
 	const queryClient = useQueryClient()
@@ -60,6 +66,7 @@ export function useViewerSessionFlow({
 	const createViewerSessionRef = useRef(createViewerSession.mutateAsync)
 	const issueViewerTokenRef = useRef(issueViewerToken.mutateAsync)
 	const manualCloseKindRef = useRef(manualCloseKind)
+	const autoRecoveryCountRef = useRef(0)
 	const selectedPVCRef = useRef(selectedPVC)
 	const pollingSessionID = session?.id ?? null
 	const pollingSessionStatus = session?.status ?? null
@@ -89,6 +96,7 @@ export function useViewerSessionFlow({
 	}, [])
 
 	const start = useCallback(async (pvc: ViewerSelection) => {
+		autoRecoveryCountRef.current = 0
 		setSelectedPVC(pvc)
 		setManualCloseKind(null)
 		setIsReconnecting(false)
@@ -110,6 +118,7 @@ export function useViewerSessionFlow({
 		setStatus('idle')
 		setToken(null)
 		issuingTokenRef.current = false
+		autoRecoveryCountRef.current = 0
 	}, [])
 
 	const registerManualClose = useCallback((kind: ManualCloseKind) => {
@@ -126,6 +135,7 @@ export function useViewerSessionFlow({
 		setStatus('idle')
 		setToken(null)
 		issuingTokenRef.current = false
+		autoRecoveryCountRef.current = 0
 	}, [session])
 
 	const recover = useCallback(async (caught?: unknown) => {
@@ -133,8 +143,20 @@ export function useViewerSessionFlow({
 		if (!currentPVC || manualCloseKindRef.current) {
 			return
 		}
-		if (caught) {
-			setError(normalizeViewerError(caught))
+		const nextError = caught ? normalizeViewerError(caught) : null
+		if (nextError) {
+			setError(nextError)
+		}
+		if (nextError && shouldRecoverSession(nextError)) {
+			if (autoRecoveryCountRef.current >= maxAutoRecoveries) {
+				setToken(null)
+				setIsReconnecting(false)
+				setStatus('failed')
+				setSession(null)
+				issuingTokenRef.current = false
+				return
+			}
+			autoRecoveryCountRef.current += 1
 		}
 		setIsReconnecting(true)
 		setToken(null)
@@ -149,7 +171,7 @@ export function useViewerSessionFlow({
 		finally {
 			setIsReconnecting(false)
 		}
-	}, [createForPVC])
+	}, [createForPVC, maxAutoRecoveries])
 
 	useEffect(() => {
 		if (!pollingSessionID || !pollingSessionStatus || !shouldPollStatus(pollingSessionStatus)) {
@@ -172,7 +194,7 @@ export function useViewerSessionFlow({
 				})
 				.catch(async (caught) => {
 					const nextError = normalizeViewerError(caught)
-					if (nextError.code === 'VIEWER_SESSION_NOT_FOUND' && selectedPVCRef.current) {
+					if (shouldRecoverSession(nextError) && selectedPVCRef.current) {
 						try {
 							await recover(nextError)
 						}
@@ -203,13 +225,19 @@ export function useViewerSessionFlow({
 				setStatus('ready')
 			})
 			.catch((caught) => {
-				setError(normalizeViewerError(caught))
+				const nextError = normalizeViewerError(caught)
+				if (shouldRecoverSession(nextError) && selectedPVCRef.current) {
+					issuingTokenRef.current = false
+					void recover(nextError)
+					return
+				}
+				setError(nextError)
 				setStatus('failed')
 			})
 			.finally(() => {
 				issuingTokenRef.current = false
 			})
-	}, [token, tokenReady, tokenSessionID, tokenSessionStatus])
+	}, [recover, token, tokenReady, tokenSessionID, tokenSessionStatus])
 
 	return {
 		error,

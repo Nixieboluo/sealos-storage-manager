@@ -47,6 +47,7 @@ export function ViewerLaunchPanel({
 	const { t } = useTranslation()
 	const flow = useViewerSessionFlow({ api })
 	const active = flow.status === 'ready'
+	const starting = flow.status === 'creating' || flow.status === 'polling' || flow.status === 'issuing-token'
 	const startFlow = flow.start
 	const recoverFlow = flow.recover
 	const startFlowRef = useRef(startFlow)
@@ -137,7 +138,7 @@ export function ViewerLaunchPanel({
 					: null}
 				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<Button
-						disabled={!pvc || flow.status === 'creating' || flow.status === 'polling' || flow.status === 'issuing-token'}
+						disabled={!pvc || starting}
 						onClick={() => {
 							if (!pvc) {
 								return
@@ -145,12 +146,13 @@ export function ViewerLaunchPanel({
 							void flow.start(pvcIdentity(pvc))
 						}}
 					>
-						{flow.status === 'creating' || flow.status === 'polling' || flow.status === 'issuing-token'
+						{starting
 							? t('common.loading')
 							: t('actions.launchViewer')}
 					</Button>
 					<SessionActions
 						api={api}
+						canDiscardLocalState={flow.status === 'failed' || flow.isManualClosed}
 						onManualClose={flow.registerManualClose}
 						podSessionID={flow.session?.pod_session_id ?? null}
 						viewerSessionID={flow.session?.id ?? null}
