@@ -2,13 +2,14 @@ GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
 ENCORE ?= encore
-CONFIG ?= config/viewer.yaml
+CONFIG ?= config/viewer.debug.yaml
+INTEGRATION_CONFIG ?= config/viewer.integration.yaml
 IMAGE ?= sealos-storage-manager-viewer:dev
 
 .PHONY: dev fmt fmt-check lint vet test test-race test-integration security build-image verify tidy
 
 dev:
-	$(ENCORE) run --listen 0.0.0.0:4000 --browser=never
+	CONFIG=$(CONFIG) $(ENCORE) run --listen 0.0.0.0:4000 --browser=never
 
 fmt:
 	$(GO) fmt ./...
@@ -29,7 +30,7 @@ test-race:
 	$(ENCORE) test -race ./...
 
 test-integration:
-	$(ENCORE) test -tags=integration ./test/integration -config $(CONFIG) -count=1
+	CONFIG=$(INTEGRATION_CONFIG) $(ENCORE) test -tags=integration ./test/integration -count=1
 
 security:
 	$(GOVULNCHECK) ./...

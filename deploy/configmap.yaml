@@ -7,7 +7,6 @@ data:
   viewer.yaml: |
     # Replace every example value before deploying.
     viewer:
-      namespace_allowlist: []
       backend_verify_url: https://storage-manager.example.com/internal/filebrowser-hook/verify
       hook_client_token: replace-me
       hook_script: |
@@ -108,3 +107,7 @@ data:
         sample_ratio: 1
         batch_timeout: 5s
         export_timeout: 5s
+
+    debug:
+      enabled: false
+      forced_namespace: ""

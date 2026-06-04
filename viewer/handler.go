@@ -12,6 +12,7 @@ import (
 	"encore.dev/beta/errs"
 	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/authn"
+	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/session"
@@ -62,6 +63,15 @@ type Handler struct {
 	auth     authService
 	recorder *observability.Recorder
 	authz    authorizer
+	debug    config.DebugConfig
+}
+
+type HandlerOption func(*Handler)
+
+func WithDebugConfig(debug config.DebugConfig) HandlerOption {
+	return func(h *Handler) {
+		h.debug = debug
+	}
 }
 
 type AuthenticatedRequest struct {
@@ -168,17 +178,22 @@ func NewHandler(
 	managementClient kubernetes.Interface,
 	recorder *observability.Recorder,
 	authz authorizer,
+	options ...HandlerOption,
 ) *Handler {
 	if authz == nil {
 		authz = newKubernetesAuthorizer(managementClient, recorder)
 	}
-	return &Handler{
+	handler := &Handler{
 		viewers:  viewers,
 		pods:     pods,
 		auth:     auth,
 		recorder: recorder,
 		authz:    authz,
 	}
+	for _, option := range options {
+		option(handler)
+	}
+	return handler
 }
 
 func (h *Handler) ListPVCsData(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, error) {
@@ -417,7 +432,7 @@ func (h *Handler) Metrics(w http.ResponseWriter, req *http.Request) {
 
 func (h *Handler) listPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCsResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodGet, "/api/pvcs", err.Status, start)
 		return nil, err
@@ -448,7 +463,7 @@ func (h *Handler) listPVCs(ctx context.Context, req *ListPVCsRequest) (*ListPVCs
 
 func (h *Handler) getContext(ctx context.Context, req *AuthenticatedRequest) (*ContextResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodGet, "/api/context", err.Status, start)
 		return nil, err
@@ -470,7 +485,7 @@ func (h *Handler) getContext(ctx context.Context, req *AuthenticatedRequest) (*C
 
 func (h *Handler) createPVC(ctx context.Context, req *CreatePVCRequest) (*PVCResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodPost, "/api/pvcs", err.Status, start)
 		return nil, err
@@ -510,7 +525,7 @@ func (h *Handler) deletePVC(
 	req *AuthenticatedRequest,
 ) (*PVCResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodDelete, "/api/pvcs/:namespace/:name", err.Status, start)
 		return nil, err
@@ -546,7 +561,7 @@ func (h *Handler) expandPVC(
 	req *ExpandPVCRequest,
 ) (*PVCResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodPost, "/api/pvcs/:namespace/:name/expand", err.Status, start)
 		return nil, err
@@ -582,7 +597,7 @@ func (h *Handler) listStorageClasses(
 	req *AuthenticatedRequest,
 ) (*ListStorageClassesResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodGet, "/api/storage-classes", err.Status, start)
 		return nil, err
@@ -611,7 +626,7 @@ func (h *Handler) createViewerSession(
 	req *CreateViewerSessionRequest,
 ) (*ViewerSessionResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodPost, "/api/viewer-sessions", err.Status, start)
 		return nil, err
@@ -661,7 +676,7 @@ func (h *Handler) getViewerSession(
 	req *AuthenticatedRequest,
 ) (*ViewerSessionResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodGet, "/api/viewer-sessions/:id", err.Status, start)
 		return nil, err
@@ -688,7 +703,7 @@ func (h *Handler) issueToken(
 	req *AuthenticatedRequest,
 ) (*ViewerTokenResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodPost, "/api/viewer-sessions/:id/token", err.Status, start)
 		return nil, err
@@ -719,7 +734,7 @@ func (h *Handler) heartbeat(
 	req *AuthenticatedRequest,
 ) (*HeartbeatResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodPost, "/api/viewer-sessions/:id/heartbeat", err.Status, start)
 		return nil, err
@@ -746,7 +761,7 @@ func (h *Handler) closeViewerSession(
 	req *AuthenticatedRequest,
 ) (*ViewerSessionResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodDelete, "/api/viewer-sessions/:id", err.Status, start)
 		return nil, err
@@ -773,7 +788,7 @@ func (h *Handler) closePodSession(
 	req *AuthenticatedRequest,
 ) (*PodSessionResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodDelete, "/api/pod-sessions/:id", err.Status, start)
 		return nil, err
@@ -800,7 +815,7 @@ func (h *Handler) getPodSession(
 	req *AuthenticatedRequest,
 ) (*PodSessionResponse, *apienv.Error) {
 	start := time.Now()
-	principal, err := authenticateRequest(req)
+	principal, err := h.authenticateRequest(req)
 	if err != nil {
 		h.observe(ctx, http.MethodGet, "/api/pod-sessions/:id", err.Status, start)
 		return nil, err
@@ -854,10 +869,13 @@ func (h *Handler) observe(ctx context.Context, method string, route string, stat
 	h.recorder.ObserveHTTP(ctx, method, route, status, time.Since(start))
 }
 
-func authenticateRequest(req interface{ authorizationHeader() string }) (*authn.Principal, *apienv.Error) {
+func (h *Handler) authenticateRequest(req interface{ authorizationHeader() string }) (*authn.Principal, *apienv.Error) {
 	principal, err := authn.PrincipalFromAuthorization(req.authorizationHeader())
 	if err != nil {
 		return nil, apienv.NewError(401, apienv.CodeUnauthorized, "Unauthorized", nil)
+	}
+	if h.debug.Enabled && strings.TrimSpace(h.debug.ForcedNamespace) != "" {
+		principal.Namespace = strings.TrimSpace(h.debug.ForcedNamespace)
 	}
 	return principal, nil
 }

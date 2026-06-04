@@ -63,7 +63,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 
 func runtimeHandler() *Handler {
 	runtimeOnce.Do(func() {
-		runtime, err := NewRuntime(config.DefaultPath)
+		runtime, err := NewRuntime("")
 		if err != nil {
 			slog.Error("viewer runtime unavailable", "error", err)
 			return
@@ -124,6 +124,7 @@ func newRuntimeFromConfig(cfg config.Config) (*Runtime, error) {
 		clientset,
 		recorder,
 		nil,
+		WithDebugConfig(cfg.Debug),
 	)
 	return &Runtime{
 		Handler:  handler,
@@ -153,7 +154,10 @@ func wrapKubernetesTransport(restConfig *rest.Config, provider trace.TracerProvi
 }
 
 func managementRESTConfig(cfg config.Config) (*rest.Config, error) {
-	path := cfg.Kubernetes.ManagementKubeconfigPath
+	path := ""
+	if cfg.Debug.Enabled {
+		path = cfg.Debug.ManagementKubeconfigPath
+	}
 	if path == "" {
 		restConfig, err := rest.InClusterConfig()
 		if err != nil {
@@ -174,7 +178,7 @@ func managementRESTConfig(cfg config.Config) (*rest.Config, error) {
 //encore:api private
 func CleanupViewerState(ctx context.Context) error {
 	runtimeOnce.Do(func() {
-		runtime, err := NewRuntime(config.DefaultPath)
+		runtime, err := NewRuntime("")
 		if err != nil {
 			slog.Error("viewer runtime unavailable", "error", err)
 			return

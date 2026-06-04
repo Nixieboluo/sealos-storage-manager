@@ -21,7 +21,8 @@ func TestManagementRESTConfigUsesConfiguredKubeconfig(t *testing.T) {
 		t.Fatalf("write kubeconfig: %v", err)
 	}
 	cfg := config.Default()
-	cfg.Kubernetes.ManagementKubeconfigPath = kubeconfigPath
+	cfg.Debug.Enabled = true
+	cfg.Debug.ManagementKubeconfigPath = kubeconfigPath
 
 	restConfig, err := managementRESTConfig(cfg)
 	if err != nil {

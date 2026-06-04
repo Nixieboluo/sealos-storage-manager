@@ -11,34 +11,29 @@ import (
 )
 
 const DefaultPath = "config/viewer.yaml"
+const EnvPath = "CONFIG"
 
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
-	Kubernetes    KubernetesConfig    `yaml:"kubernetes"`
 	Viewer        ViewerConfig        `yaml:"viewer"`
 	Sessions      SessionsConfig      `yaml:"sessions"`
 	Cache         CacheConfig         `yaml:"cache"`
 	Observability ObservabilityConfig `yaml:"observability"`
-	Integration   IntegrationConfig   `yaml:"integration"`
+	Debug         DebugConfig         `yaml:"debug"`
 }
 
 type ServerConfig struct {
 	ConfigPath string `yaml:"config_path"`
 }
 
-type KubernetesConfig struct {
-	ManagementKubeconfigPath string `yaml:"management_kubeconfig_path"`
-}
-
 type ViewerConfig struct {
-	NamespaceAllowlist []string          `yaml:"namespace_allowlist"`
-	BackendVerifyURL   string            `yaml:"backend_verify_url"`
-	HookClientToken    string            `yaml:"hook_client_token"`
-	HookScript         string            `yaml:"hook_script"`
-	FileBrowser        FileBrowserConfig `yaml:"filebrowser"`
-	Pod                PodConfig         `yaml:"pod"`
-	Service            ServiceConfig     `yaml:"service"`
-	Ingress            IngressConfig     `yaml:"ingress"`
+	BackendVerifyURL string            `yaml:"backend_verify_url"`
+	HookClientToken  string            `yaml:"hook_client_token"`
+	HookScript       string            `yaml:"hook_script"`
+	FileBrowser      FileBrowserConfig `yaml:"filebrowser"`
+	Pod              PodConfig         `yaml:"pod"`
+	Service          ServiceConfig     `yaml:"service"`
+	Ingress          IngressConfig     `yaml:"ingress"`
 }
 
 type FileBrowserConfig struct {
@@ -108,14 +103,18 @@ type TracesConfig struct {
 	ExportTimeout time.Duration `yaml:"export_timeout"`
 }
 
-type IntegrationConfig struct {
-	KubeconfigPath           string `yaml:"kubeconfig_path"`
+type DebugConfig struct {
+	Enabled                  bool   `yaml:"enabled"`
+	UserKubeconfigPath       string `yaml:"user_kubeconfig_path"`
 	ManagementKubeconfigPath string `yaml:"management_kubeconfig_path"`
-	Namespace                string `yaml:"namespace"`
-	StorageClassName         string `yaml:"storage_class_name"`
+	ForcedNamespace          string `yaml:"forced_namespace"`
 }
 
 func LoadFile(path string) (Config, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = strings.TrimSpace(os.Getenv(EnvPath))
+	}
 	if path == "" {
 		path = DefaultPath
 	}
@@ -149,10 +148,7 @@ func Default() Config {
 		Server: ServerConfig{
 			ConfigPath: DefaultPath,
 		},
-		Kubernetes: KubernetesConfig{},
-		Viewer: ViewerConfig{
-			NamespaceAllowlist: []string{},
-		},
+		Viewer: ViewerConfig{},
 		Sessions: SessionsConfig{
 			HeartbeatInterval:   30 * time.Second,
 			ViewerSessionTimout: 90 * time.Second,
@@ -183,11 +179,7 @@ func Default() Config {
 				ExportTimeout: 5 * time.Second,
 			},
 		},
-		Integration: IntegrationConfig{
-			KubeconfigPath:           "kubeconfig.test.yaml",
-			ManagementKubeconfigPath: "kubeconfig.management.yaml",
-			Namespace:                "default",
-		},
+		Debug: DebugConfig{},
 	}
 }
 
@@ -312,25 +304,19 @@ func normalizedTraceExporter(value string) string {
 
 func (cfg Config) Redacted() map[string]any {
 	return map[string]any{
-		"server":     cfg.Server,
-		"kubernetes": cfg.Kubernetes,
+		"server": cfg.Server,
 		"viewer": map[string]any{
-			"namespace_allowlist": cfg.Viewer.NamespaceAllowlist,
-			"backend_verify_url":  cfg.Viewer.BackendVerifyURL,
-			"hook_client_token":   "redacted",
-			"hook_script":         "redacted",
-			"filebrowser":         cfg.Viewer.FileBrowser,
-			"pod":                 cfg.Viewer.Pod,
-			"service":             cfg.Viewer.Service,
-			"ingress":             cfg.Viewer.Ingress,
+			"backend_verify_url": cfg.Viewer.BackendVerifyURL,
+			"hook_client_token":  "redacted",
+			"hook_script":        "redacted",
+			"filebrowser":        cfg.Viewer.FileBrowser,
+			"pod":                cfg.Viewer.Pod,
+			"service":            cfg.Viewer.Service,
+			"ingress":            cfg.Viewer.Ingress,
 		},
 		"sessions":      cfg.Sessions,
 		"cache":         cfg.Cache,
 		"observability": cfg.Observability,
-		"integration": map[string]any{
-			"kubeconfig_path":    cfg.Integration.KubeconfigPath,
-			"namespace":          cfg.Integration.Namespace,
-			"storage_class_name": cfg.Integration.StorageClassName,
-		},
+		"debug":         cfg.Debug,
 	}
 }

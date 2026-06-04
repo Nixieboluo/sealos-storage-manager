@@ -226,6 +226,61 @@ func TestHandlerGetContextUsesKubeconfigNamespace(t *testing.T) {
 	}
 }
 
+func TestHandlerGetContextUsesDebugForcedNamespace(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+		WithDebugConfig(config.DebugConfig{
+			Enabled:         true,
+			ForcedNamespace: "forced-ns",
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/context", nil)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.GetContext(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"namespace":"forced-ns"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerForcedNamespaceRejectsKubeconfigNamespaceRequest(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		&fakeViewerService{},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+		WithDebugConfig(config.DebugConfig{
+			Enabled:         true,
+			ForcedNamespace: "forced-ns",
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/pvcs?namespace=ns", nil)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.ListPVCs(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestHandlerRejectsExplicitDifferentNamespace(t *testing.T) {
 	t.Parallel()
 

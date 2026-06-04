@@ -1,5 +1,5 @@
 viewer:
-  backend_verify_url: https://storage-manager.example.com/internal/filebrowser-hook/verify
+  backend_verify_url: http://localhost:4000/internal/filebrowser-hook/verify
   hook_client_token: example-hook-token
   hook_script: |
     #!/bin/sh
@@ -85,7 +85,7 @@ viewer:
     port: 80
   ingress:
     class_name: nginx
-    host_template: viewer-{{ .PodSessionID }}.example.com
+    host_template: viewer-{{ .PodSessionID }}.example.test
     tls_secret_name: ""
 
 sessions:
@@ -109,7 +109,7 @@ observability:
   service_name: sealos-storage-manager-viewer
   logs:
     exporter: encore
-    level: info
+    level: debug
   traces:
     exporter: none
     endpoint: ""
@@ -118,5 +118,7 @@ observability:
     export_timeout: 5s
 
 debug:
-  enabled: false
-  forced_namespace: ""
+  enabled: true
+  user_kubeconfig_path: kubeconfig.test.yaml
+  management_kubeconfig_path: kubeconfig.management.yaml
+  forced_namespace: default

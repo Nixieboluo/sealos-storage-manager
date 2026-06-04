@@ -53,8 +53,6 @@ func TestLoadAppliesDefaultsAndOverrides(t *testing.T) {
 	t.Parallel()
 
 	cfg, err := Load([]byte(`
-kubernetes:
-  management_kubeconfig_path: kubeconfig.test.yaml
 viewer:
   backend_verify_url: http://backend/internal/filebrowser-hook/verify
   hook_client_token: super-secret
@@ -89,6 +87,11 @@ observability:
     sample_ratio: 0.25
     batch_timeout: 3s
     export_timeout: 2s
+debug:
+  enabled: true
+  user_kubeconfig_path: kubeconfig.test.yaml
+  management_kubeconfig_path: kubeconfig.management.yaml
+  forced_namespace: ns-debug
 `))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -99,11 +102,20 @@ observability:
 	if cfg.Viewer.FileBrowser.BinaryPath != "/custom-filebrowser" {
 		t.Fatalf("binary path = %q", cfg.Viewer.FileBrowser.BinaryPath)
 	}
-	if cfg.Kubernetes.ManagementKubeconfigPath != "kubeconfig.test.yaml" {
-		t.Fatalf("management kubeconfig path = %q", cfg.Kubernetes.ManagementKubeconfigPath)
-	}
 	if cfg.Viewer.FileBrowser.TokenTTL != 20*time.Minute {
 		t.Fatalf("token ttl = %s", cfg.Viewer.FileBrowser.TokenTTL)
+	}
+	if !cfg.Debug.Enabled {
+		t.Fatal("debug.enabled = false")
+	}
+	if cfg.Debug.UserKubeconfigPath != "kubeconfig.test.yaml" {
+		t.Fatalf("debug user kubeconfig path = %q", cfg.Debug.UserKubeconfigPath)
+	}
+	if cfg.Debug.ManagementKubeconfigPath != "kubeconfig.management.yaml" {
+		t.Fatalf("debug management kubeconfig path = %q", cfg.Debug.ManagementKubeconfigPath)
+	}
+	if cfg.Debug.ForcedNamespace != "ns-debug" {
+		t.Fatalf("debug forced namespace = %q", cfg.Debug.ForcedNamespace)
 	}
 	if cfg.Observability.Logs.Level != "debug" {
 		t.Fatalf("log level = %q", cfg.Observability.Logs.Level)
@@ -217,12 +229,96 @@ func TestRedactedHidesHookToken(t *testing.T) {
 	}
 }
 
+func TestLoadFileUsesExplicitPathBeforeEnv(t *testing.T) {
+	dir := t.TempDir()
+	explicitPath := filepath.Join(dir, "explicit.yaml")
+	envPath := filepath.Join(dir, "env.yaml")
+	if err := os.WriteFile(explicitPath, []byte(validConfigYAML), 0o600); err != nil {
+		t.Fatalf("write explicit config: %v", err)
+	}
+	if err := os.WriteFile(envPath, []byte(replaceConfig(t, validConfigYAML, "filebrowser/filebrowser:v2.30.0", "env/filebrowser:v1")), 0o600); err != nil {
+		t.Fatalf("write env config: %v", err)
+	}
+	t.Setenv(EnvPath, envPath)
+
+	cfg, err := LoadFile(explicitPath)
+	if err != nil {
+		t.Fatalf("LoadFile(explicit) error = %v", err)
+	}
+	if cfg.Server.ConfigPath != explicitPath {
+		t.Fatalf("config path = %q", cfg.Server.ConfigPath)
+	}
+	if cfg.Viewer.FileBrowser.Image != "filebrowser/filebrowser:v2.30.0" {
+		t.Fatalf("image = %q", cfg.Viewer.FileBrowser.Image)
+	}
+}
+
+func TestLoadFileUsesEnvPathWhenPathEmpty(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "env.yaml")
+	if err := os.WriteFile(envPath, []byte(validConfigYAML), 0o600); err != nil {
+		t.Fatalf("write env config: %v", err)
+	}
+	t.Setenv(EnvPath, envPath)
+
+	cfg, err := LoadFile("")
+	if err != nil {
+		t.Fatalf("LoadFile(\"\") error = %v", err)
+	}
+	if cfg.Server.ConfigPath != envPath {
+		t.Fatalf("config path = %q", cfg.Server.ConfigPath)
+	}
+}
+
+func TestLoadDoesNotReadEnvPath(t *testing.T) {
+	t.Setenv(EnvPath, filepath.Join(t.TempDir(), "missing.yaml"))
+	cfg, err := Load([]byte(validConfigYAML))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.ConfigPath != DefaultPath {
+		t.Fatalf("config path = %q", cfg.Server.ConfigPath)
+	}
+}
+
 func TestCommittedExampleConfigLoads(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
 	if _, err := LoadFile(filepath.Join(root, "config", "viewer.example.yaml")); err != nil {
 		t.Fatalf("LoadFile(viewer.example.yaml) error = %v", err)
+	}
+}
+
+func TestCommittedDebugExampleConfigLoads(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	cfg, err := LoadFile(filepath.Join(root, "config", "viewer.debug.example.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile(viewer.debug.example.yaml) error = %v", err)
+	}
+	if !cfg.Debug.Enabled {
+		t.Fatal("debug example must enable debug")
+	}
+	if strings.TrimSpace(cfg.Debug.UserKubeconfigPath) == "" {
+		t.Fatal("debug example missing user kubeconfig path")
+	}
+}
+
+func TestCommittedIntegrationExampleConfigLoads(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	cfg, err := LoadFile(filepath.Join(root, "config", "viewer.integration.example.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile(viewer.integration.example.yaml) error = %v", err)
+	}
+	if !cfg.Debug.Enabled {
+		t.Fatal("integration example must enable debug")
+	}
+	if strings.TrimSpace(cfg.Debug.UserKubeconfigPath) == "" {
+		t.Fatal("integration example missing user kubeconfig path")
 	}
 }
 
@@ -289,6 +385,16 @@ func TestDeployConfigMapEmbedsValidViewerConfig(t *testing.T) {
 	}
 	if _, err := Load([]byte(viewerYAML)); err != nil {
 		t.Fatalf("embedded viewer.yaml error = %v", err)
+	}
+	for _, forbidden := range []string{
+		"namespace_allowlist",
+		"user_kubeconfig_path",
+		"management_kubeconfig_path",
+		"storage_class_name",
+	} {
+		if strings.Contains(viewerYAML, forbidden) {
+			t.Fatalf("deploy config contains %q", forbidden)
+		}
 	}
 }
 

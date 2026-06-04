@@ -8,9 +8,17 @@ Do not commit local credentials or generated runtime config:
 
 - `kubeconfig.test.yaml`
 - `config/viewer.yaml`
+- `config/viewer.debug.yaml`
+- `config/viewer.integration.yaml`
 - `config/*.local.yaml`
 
-Use `config/viewer.example.yaml` as the committed template.
+Use the committed templates for local files:
+
+```sh
+cp config/viewer.example.yaml config/viewer.yaml
+cp config/viewer.debug.example.yaml config/viewer.debug.yaml
+cp config/viewer.integration.example.yaml config/viewer.integration.yaml
+```
 
 ## Quality Gates
 
@@ -27,11 +35,10 @@ make security
 make build-image IMAGE=registry.example.com/viewer-backend:dev
 ```
 
-`make test-integration` reads the kubeconfig path from the YAML config and is intended for local protected development only.
-
-Create a local `config/viewer.yaml` from `config/viewer.example.yaml` and point
-`integration.kubeconfig_path` at `kubeconfig.test.yaml`. Both files are ignored
-by git.
+`make test-integration` uses a real Kubernetes cluster and reads
+`debug.user_kubeconfig_path`, `debug.management_kubeconfig_path`, and optional
+`debug.forced_namespace` from `config/viewer.integration.yaml`. Local
+kubeconfigs and integration config files are ignored by git.
 
 ## Local Dev Server
 
@@ -53,12 +60,24 @@ code generation and runtime setup:
 ```sh
 make test
 make test-race
-make test-integration CONFIG=config/viewer.yaml
+make test-integration
 ```
 
 `make test-race` also wraps `encore test -race`; Encore CLI v1.57.4 currently
 crashes in its race runtime on macOS arm64, so the default `make verify` gate
 uses `make test` instead.
+
+The backend config path is selected by the `CONFIG` environment variable. The
+Makefile sets it for local Encore commands:
+
+```sh
+make dev CONFIG=config/viewer.debug.yaml
+make test-integration INTEGRATION_CONFIG=config/viewer.integration.yaml
+```
+
+Frontend `VITE_*` variables only affect the Vite workspace under `web/`.
+Self-hosted runtime variables referenced by `infra-config.json`, such as
+`PROMETHEUS_REMOTE_WRITE_URL`, stay separate from viewer business config.
 
 All public endpoints are typed Encore APIs so OpenAPI/client generation includes
 request and response schemas:

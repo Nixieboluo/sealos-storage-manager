@@ -6,76 +6,139 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"flag"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/authn"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-var configPath = flag.String("config", config.DefaultPath, "viewer backend config path")
+func TestIntegrationConfigLoadsFromCONFIG(t *testing.T) {
+	root := repoRoot(t)
+	cfg := loadIntegrationConfig(t, root)
+	if !cfg.Debug.Enabled {
+		t.Fatal("debug.enabled = false")
+	}
+	if strings.TrimSpace(cfg.Debug.UserKubeconfigPath) == "" {
+		t.Fatal("debug.user_kubeconfig_path is empty")
+	}
+}
 
 func TestIntegrationKubeconfigCanListPVCs(t *testing.T) {
 	root := repoRoot(t)
 	cfg := loadIntegrationConfig(t, root)
-	userClient := integrationClient(t, root, cfg.Integration.KubeconfigPath)
+	userClient := integrationClient(t, root, cfg.Debug.UserKubeconfigPath)
+	namespace := integrationNamespace(t, root, cfg)
 	client := kube.New(userClient)
-	if _, err := client.ListPVCs(t.Context(), cfg.Integration.Namespace); err != nil {
-		t.Fatalf("list pvcs in %q: %v", cfg.Integration.Namespace, err)
+	if _, err := client.ListPVCs(t.Context(), namespace); err != nil {
+		t.Fatalf("list pvcs in %q: %v", namespace, err)
+	}
+}
+
+func TestIntegrationListStorageClasses(t *testing.T) {
+	root := repoRoot(t)
+	cfg := loadIntegrationConfig(t, root)
+	managementClient := integrationClient(t, root, cfg.Debug.ManagementKubeconfigPath)
+	client := kube.New(managementClient)
+	if _, err := client.ListStorageClasses(t.Context()); err != nil {
+		t.Fatalf("list storageclasses: %v", err)
 	}
 }
 
 func TestIntegrationUserAndManagementKubeconfigsResolveSameNamespace(t *testing.T) {
 	root := repoRoot(t)
 	cfg := loadIntegrationConfig(t, root)
-	userClient := integrationClient(t, root, cfg.Integration.KubeconfigPath)
-	managementPath := cfg.Integration.ManagementKubeconfigPath
-	if managementPath == "" {
-		managementPath = cfg.Kubernetes.ManagementKubeconfigPath
-	}
-	managementClient := integrationClient(t, root, managementPath)
+	userClient := integrationClient(t, root, cfg.Debug.UserKubeconfigPath)
+	managementClient := integrationClient(t, root, cfg.Debug.ManagementKubeconfigPath)
+	namespace := integrationNamespace(t, root, cfg)
 
-	userNamespace, err := userClient.CoreV1().Namespaces().Get(
-		t.Context(),
-		cfg.Integration.Namespace,
-		metav1.GetOptions{},
-	)
+	userNamespace, err := userClient.CoreV1().Namespaces().Get(t.Context(), namespace, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("user kubeconfig get namespace %q: %v", cfg.Integration.Namespace, err)
+		t.Fatalf("user kubeconfig get namespace %q: %v", namespace, err)
 	}
-	managementNamespace, err := managementClient.CoreV1().Namespaces().Get(
-		t.Context(),
-		cfg.Integration.Namespace,
-		metav1.GetOptions{},
-	)
+	managementNamespace, err := managementClient.CoreV1().Namespaces().Get(t.Context(), namespace, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("management kubeconfig get namespace %q: %v", cfg.Integration.Namespace, err)
+		t.Fatalf("management kubeconfig get namespace %q: %v", namespace, err)
 	}
 	if userNamespace.UID != managementNamespace.UID {
 		t.Fatalf("namespace UID mismatch: user=%q management=%q", userNamespace.UID, managementNamespace.UID)
 	}
 }
 
+func TestIntegrationCreateExpandDeletePVC(t *testing.T) {
+	root := repoRoot(t)
+	cfg := loadIntegrationConfig(t, root)
+	managementClient := integrationClient(t, root, cfg.Debug.ManagementKubeconfigPath)
+	namespace := integrationNamespace(t, root, cfg)
+	name := integrationResourceName(t, "ssm-it-pvc")
+	client := kube.New(managementClient)
+	ctx := t.Context()
+
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 30*time.Second)
+		defer cancel()
+		_ = managementClient.CoreV1().PersistentVolumeClaims(namespace).Delete(cleanupCtx, name, metav1.DeleteOptions{})
+	})
+
+	created, err := client.CreatePVC(ctx, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "sealos-storage-manager",
+				"integration-test":             "create-expand-delete-pvc",
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create pvc: %v", err)
+	}
+	if created.Name != name {
+		t.Fatalf("created pvc name = %q", created.Name)
+	}
+
+	expanded, err := client.UpdatePVCStorageRequest(ctx, namespace, name, resource.MustParse("2Gi"))
+	if err != nil {
+		t.Fatalf("expand pvc: %v", err)
+	}
+	if expanded.Spec.Resources.Requests.Storage().String() != "2Gi" {
+		t.Fatalf("expanded storage = %s", expanded.Spec.Resources.Requests.Storage().String())
+	}
+
+	if err := client.DeletePVC(ctx, namespace, name); err != nil {
+		t.Fatalf("delete pvc: %v", err)
+	}
+	waitForNotFound(t, "pvc", func(ctx context.Context) error {
+		_, err := managementClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		return err
+	})
+}
+
 func TestIntegrationOwnerReferencesGarbageCollectViewerAttachments(t *testing.T) {
 	root := repoRoot(t)
 	cfg := loadIntegrationConfig(t, root)
-	managementPath := cfg.Integration.ManagementKubeconfigPath
-	if managementPath == "" {
-		managementPath = cfg.Kubernetes.ManagementKubeconfigPath
-	}
-	client := integrationClient(t, root, managementPath)
-	namespace := cfg.Integration.Namespace
-	name := integrationResourceName(t)
+	client := integrationClient(t, root, cfg.Debug.ManagementKubeconfigPath)
+	namespace := integrationNamespace(t, root, cfg)
+	name := integrationResourceName(t, "ownerref")
 	ctx := t.Context()
 
 	pod, err := client.CoreV1().Pods(namespace).Create(ctx, &corev1.Pod{
@@ -192,32 +255,38 @@ func TestIntegrationOwnerReferencesGarbageCollectViewerAttachments(t *testing.T)
 
 func loadIntegrationConfig(t *testing.T, root string) config.Config {
 	t.Helper()
-	cfgPath := *configPath
-	if !filepath.IsAbs(cfgPath) {
-		cfgPath = filepath.Join(root, cfgPath)
-	}
-	cfg, err := config.LoadFile(cfgPath)
+	cfg, err := config.LoadFile("")
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file or directory") {
+			t.Skipf("integration config unavailable: %v", err)
+		}
+		t.Fatalf("load config from %s: %v", config.EnvPath, err)
 	}
-	if cfg.Integration.KubeconfigPath == "" {
-		t.Skip("integration.kubeconfig_path is empty")
+	if !cfg.Debug.Enabled {
+		t.Skip("debug.enabled is false")
+	}
+	if cfg.Debug.UserKubeconfigPath == "" {
+		t.Skip("debug.user_kubeconfig_path is empty")
+	}
+	if cfg.Debug.ManagementKubeconfigPath == "" {
+		t.Skip("debug.management_kubeconfig_path is empty")
+	}
+	if _, ok := os.LookupEnv(config.EnvPath); !ok && !filepath.IsAbs(cfg.Server.ConfigPath) {
+		cfg.Server.ConfigPath = filepath.Join(root, cfg.Server.ConfigPath)
 	}
 	return cfg
 }
 
 func integrationClient(t *testing.T, root string, kubeconfigPath string) kubernetes.Interface {
 	t.Helper()
-	if kubeconfigPath == "" {
+	path := resolvePath(root, kubeconfigPath)
+	if path == "" {
 		t.Skip("kubeconfig path is empty")
 	}
-	if !filepath.IsAbs(kubeconfigPath) {
-		kubeconfigPath = filepath.Join(root, kubeconfigPath)
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("integration kubeconfig %q unavailable: %v", path, err)
 	}
-	if _, err := os.Stat(kubeconfigPath); err != nil {
-		t.Skipf("integration kubeconfig %q unavailable: %v", kubeconfigPath, err)
-	}
-	restConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	restConfig, err := clientcmd.BuildConfigFromFlags("", path)
 	if err != nil {
 		t.Fatalf("build rest config: %v", err)
 	}
@@ -228,14 +297,38 @@ func integrationClient(t *testing.T, root string, kubeconfigPath string) kuberne
 	return clientset
 }
 
-func integrationResourceName(t *testing.T) string {
+func integrationNamespace(t *testing.T, root string, cfg config.Config) string {
+	t.Helper()
+	if namespace := strings.TrimSpace(cfg.Debug.ForcedNamespace); namespace != "" {
+		return namespace
+	}
+	path := resolvePath(root, cfg.Debug.UserKubeconfigPath)
+	data, err := os.ReadFile(path) //nolint:gosec // Integration tests read explicit local kubeconfig fixtures.
+	if err != nil {
+		t.Skipf("read user kubeconfig %q: %v", path, err)
+	}
+	principal, err := authn.PrincipalFromAuthorization(url.QueryEscape(string(data)))
+	if err != nil {
+		t.Fatalf("principal from debug user kubeconfig: %v", err)
+	}
+	return principal.Namespace
+}
+
+func resolvePath(root string, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+func integrationResourceName(t *testing.T, prefix string) string {
 	t.Helper()
 
 	var randomBytes [4]byte
 	if _, err := rand.Read(randomBytes[:]); err != nil {
 		t.Fatalf("read random bytes: %v", err)
 	}
-	return "ownerref-" + hex.EncodeToString(randomBytes[:])
+	return prefix + "-" + hex.EncodeToString(randomBytes[:])
 }
 
 func waitForNotFound(t *testing.T, resource string, get func(context.Context) error) {
@@ -255,7 +348,7 @@ func waitForNotFound(t *testing.T, resource string, get func(context.Context) er
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("%s still exists after owner pod deletion", resource)
+			t.Fatalf("%s still exists after deletion", resource)
 		case <-ticker.C:
 		}
 	}

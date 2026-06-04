@@ -132,9 +132,6 @@ func (s *ViewerService) CreatePVC(ctx context.Context, input CreatePVCInput) (pv
 		finish(err)
 	}()
 
-	if !s.namespaceAllowed(input.Namespace) {
-		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
-	}
 	storage, err := capacityQuantity(input.Capacity, input.CapacityBytes)
 	if err != nil {
 		return nil, apienv.NewError(400, apienv.CodeValidationError, err.Error(), nil)
@@ -193,9 +190,6 @@ func (s *ViewerService) DeletePVC(ctx context.Context, input DeletePVCInput) (pv
 		finish(err)
 	}()
 
-	if !s.namespaceAllowed(input.Namespace) {
-		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
-	}
 	current, err := s.kube.GetPVC(ctx, input.Namespace, input.Name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -235,9 +229,6 @@ func (s *ViewerService) ExpandPVC(ctx context.Context, input ExpandPVCInput) (pv
 		finish(err)
 	}()
 
-	if !s.namespaceAllowed(input.Namespace) {
-		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
-	}
 	target, err := capacityQuantity(input.Capacity, input.CapacityBytes)
 	if err != nil {
 		return nil, apienv.NewError(400, apienv.CodeValidationError, err.Error(), nil)
@@ -309,9 +300,6 @@ func (s *ViewerService) CreateViewerSession(
 		finish(err)
 	}()
 
-	if !s.namespaceAllowed(input.Namespace) {
-		return nil, apienv.NewError(403, apienv.CodePVCAccessDenied, "Namespace is not allowed", nil)
-	}
 	pvc, err := s.kube.GetPVC(ctx, input.Namespace, input.PVCName)
 	if err != nil {
 		return nil, apienv.NewError(404, apienv.CodePVCNotFound, "PVC not found", nil)
@@ -573,13 +561,6 @@ func (s *ViewerService) pvcToDomain(
 		ViewerScheduling: kube.SchedulingForPVC(accessModes, mountInfo),
 		Reason:           reason,
 	}, nil
-}
-
-func (s *ViewerService) namespaceAllowed(namespace string) bool {
-	if len(s.cfg.Viewer.NamespaceAllowlist) == 0 {
-		return true
-	}
-	return slices.Contains(s.cfg.Viewer.NamespaceAllowlist, namespace)
 }
 
 func primaryAccessMode(accessModes []string) string {

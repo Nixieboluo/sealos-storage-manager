@@ -5,6 +5,8 @@ kubeconfig.test.yaml
 kubeconfig.*.yaml
 kubeconfig.*.yml
 config/viewer.yaml
+config/viewer.debug.yaml
+config/viewer.integration.yaml
 config/*.local.yaml
 coverage.out
 dist/
