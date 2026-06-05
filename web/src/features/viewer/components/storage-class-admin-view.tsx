@@ -1,0 +1,137 @@
+import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
+import type { StorageClass } from '@/features/viewer/types/viewer'
+
+import { Plus, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from '@/components/ui/table'
+import { translateViewerError } from '@/features/viewer/api/viewer-error'
+import { ErrorCallout } from '@/features/viewer/components/error-callout'
+
+interface StorageClassAdminViewProps {
+	deleteMutation: UseMutationResult<StorageClass, Error, string>
+	onCreate: () => void
+	onDelete: (name: string) => void
+	onDescribe: (name: string) => void
+	onEdit: (name: string) => void
+	onEditPolicy: (storageClass: StorageClass) => void
+	query: UseQueryResult<StorageClass[], Error>
+}
+
+export function StorageClassAdminView({
+	onCreate,
+	onDelete,
+	onDescribe,
+	onEdit,
+	onEditPolicy,
+	query,
+}: StorageClassAdminViewProps) {
+	const { t } = useTranslation()
+	const items = query.data ?? []
+
+	return (
+		<section className="flex flex-col gap-4">
+			<header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+				<div>
+					<h2 className="text-xl font-semibold">{t('storageClasses.title')}</h2>
+					<p className="text-sm text-muted-foreground">{t('storageClasses.description')}</p>
+				</div>
+				<div className="flex gap-2">
+					<Button onClick={() => void query.refetch()} type="button" variant="outline">
+						<RefreshCw data-icon="inline-start" />
+						{t('actions.refresh')}
+					</Button>
+					<Button onClick={onCreate} type="button">
+						<Plus data-icon="inline-start" />
+						{t('storageClasses.create')}
+					</Button>
+				</div>
+			</header>
+			<Separator />
+			{query.error
+				? (
+						<ErrorCallout title={t('common.error')}>
+							{translateViewerError(query.error, t)}
+						</ErrorCallout>
+					)
+				: null}
+			<div className="overflow-x-auto rounded-lg border bg-card">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>{t('storageClasses.name')}</TableHead>
+							<TableHead>{t('storageClasses.provisioner')}</TableHead>
+							<TableHead>{t('storageClasses.reclaimPolicy')}</TableHead>
+							<TableHead>{t('storageClasses.volumeBindingMode')}</TableHead>
+							<TableHead>{t('storageClasses.allowVolumeExpansion')}</TableHead>
+							<TableHead>{t('storageClasses.visibility')}</TableHead>
+							<TableHead>{t('viewer.accessModes')}</TableHead>
+							<TableHead className="text-right">{t('files.columns.actions')}</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{items.map(storageClass => (
+							<TableRow key={storageClass.name}>
+								<TableCell className="flex items-center gap-1">
+									<div className="font-medium">{storageClass.name}</div>
+									{storageClass.is_default ? <Badge variant="secondary">{t('common.default')}</Badge> : null}
+								</TableCell>
+								<TableCell>{storageClass.provisioner}</TableCell>
+								<TableCell>{storageClass.reclaim_policy || '-'}</TableCell>
+								<TableCell>{storageClass.volume_binding_mode || '-'}</TableCell>
+								<TableCell>{storageClass.allow_volume_expansion ? t('common.yes') : t('common.no')}</TableCell>
+								<TableCell>
+									<Badge variant={storageClass.visible_in_create ? 'default' : 'outline'}>
+										{storageClass.annotation_status}
+									</Badge>
+								</TableCell>
+								<TableCell>
+									<div className="flex flex-wrap gap-1">
+										{storageClass.allowed_access_modes.length > 0
+											? storageClass.allowed_access_modes.map(mode => <Badge key={mode} variant="outline">{mode}</Badge>)
+											: <span className="text-sm text-muted-foreground">{t('common.empty')}</span>}
+									</div>
+								</TableCell>
+								<TableCell>
+									<div className="flex justify-end gap-2">
+										<Button onClick={() => onDescribe(storageClass.name)} size="sm" type="button" variant="outline">
+											{t('storageClasses.describe')}
+										</Button>
+										<Button onClick={() => onEdit(storageClass.name)} size="sm" type="button" variant="outline">
+											{t('actions.edit')}
+										</Button>
+										<Button onClick={() => onEditPolicy(storageClass)} size="sm" type="button" variant="outline">
+											{t('storageClasses.policy')}
+										</Button>
+										<Button onClick={() => onDelete(storageClass.name)} size="sm" type="button" variant="destructive">
+											{t('actions.delete')}
+										</Button>
+									</div>
+								</TableCell>
+							</TableRow>
+						))}
+						{items.length === 0
+							? (
+									<TableRow>
+										<TableCell className="py-12 text-center text-muted-foreground" colSpan={8}>
+											{query.isLoading ? t('common.loading') : t('common.empty')}
+										</TableCell>
+									</TableRow>
+								)
+							: null}
+					</TableBody>
+				</Table>
+			</div>
+		</section>
+	)
+}
