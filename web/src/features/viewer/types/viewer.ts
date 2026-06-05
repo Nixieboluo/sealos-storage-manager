@@ -1,4 +1,4 @@
-import type { domain, viewer } from '@sealos-storage-manager/encore-client'
+import type { domain, session, viewer } from '@sealos-storage-manager/encore-client'
 
 export type MountedPod = domain.MountedPod
 export type PVC = domain.PVC
@@ -8,6 +8,8 @@ export type ViewerSession = domain.ViewerSession
 export type ViewerToken = domain.ViewerToken
 export type Heartbeat = domain.Heartbeat
 export type StorageClass = domain.StorageClass
+export type StorageClassDescribe = session.StorageClassDescribe
+export type StorageClassYAML = session.StorageClassYAML
 export type ViewerContext = viewer.ViewerContext
 
 export type ViewerMode = 'readonly' | 'readwrite' | string
@@ -35,6 +37,10 @@ export const backendViewerErrorCodes = [
 	'PVC_MOUNT_CONFLICT',
 	'PVC_MOUNT_PENDING',
 	'STORAGE_CLASS_NOT_FOUND',
+	'STORAGE_CLASS_NOT_VISIBLE',
+	'STORAGE_CLASS_YAML_INVALID',
+	'STORAGE_CLASS_CONFLICT',
+	'ADMIN_ACCESS_DENIED',
 	'VIEWER_POD_CREATING',
 	'VIEWER_POD_FAILED',
 	'POD_SESSION_NOT_FOUND',
@@ -62,7 +68,20 @@ export interface CreatePVCInput {
 	capacityBytes: number
 	name: string
 	namespace: string
-	storageClassName?: string
+	storageClassName: string
+}
+
+export interface AdminCapabilities {
+	can_manage_storage_classes: boolean
+}
+
+export interface StorageClassYAMLInput {
+	yaml: string
+}
+
+export interface StorageClassPolicyInput {
+	allowedAccessModes: string[]
+	visibleInCreate: boolean
 }
 
 export interface DeletePVCInput {
@@ -82,6 +101,14 @@ export interface ListPVCsInput {
 }
 
 export interface ViewerAPI {
+	adminCapabilities: () => Promise<AdminCapabilities>
+	adminCreateStorageClass: (input: StorageClassYAMLInput) => Promise<StorageClass>
+	adminDeleteStorageClass: (name: string) => Promise<StorageClass>
+	adminDescribeStorageClass: (name: string) => Promise<StorageClassDescribe>
+	adminGetStorageClassYAML: (name: string) => Promise<StorageClassYAML>
+	adminListStorageClasses: () => Promise<StorageClass[]>
+	adminUpdateStorageClassPolicy: (name: string, input: StorageClassPolicyInput) => Promise<StorageClass>
+	adminUpdateStorageClass: (name: string, input: StorageClassYAMLInput) => Promise<StorageClass>
 	closePodSession: (podSessionID: string) => Promise<PodSession>
 	closeViewerSession: (viewerSessionID: string) => Promise<ViewerSession>
 	createPVC: (input: CreatePVCInput) => Promise<PVC>

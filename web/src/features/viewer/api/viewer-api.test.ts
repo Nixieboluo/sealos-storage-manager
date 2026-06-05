@@ -3,7 +3,14 @@ import { APIError, ErrCode } from '@sealos-storage-manager/encore-client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createViewerApi, readAuthorizationHeader } from '@/features/viewer/api/viewer-api'
 import { ViewerApiError } from '@/features/viewer/api/viewer-error'
-import { pvcFixture, storageClassFixture, viewerContextFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
+import {
+	pvcFixture,
+	storageClassDescribeFixture,
+	storageClassFixture,
+	storageClassYAMLFixture,
+	viewerContextFixture,
+	viewerSessionFixture,
+} from '@/features/viewer/test/fakes'
 
 describe('viewer API adapter', () => {
 	afterEach(() => {
@@ -45,6 +52,30 @@ describe('viewer API adapter', () => {
 		const listStorageClasses = vi.fn().mockResolvedValue({
 			storage_class_list: { items: [storageClassFixture({ name: 'standard' })] },
 		})
+		const adminCapabilities = vi.fn().mockResolvedValue({
+			admin_capabilities: { can_manage_storage_classes: true },
+		})
+		const adminCreateStorageClass = vi.fn().mockResolvedValue({
+			storage_class: storageClassFixture({ name: 'created' }),
+		})
+		const adminDeleteStorageClass = vi.fn().mockResolvedValue({
+			storage_class: storageClassFixture({ name: 'standard' }),
+		})
+		const adminDescribeStorageClass = vi.fn().mockResolvedValue({
+			storage_class_describe: storageClassDescribeFixture({ name: 'standard' }),
+		})
+		const adminGetStorageClassYAML = vi.fn().mockResolvedValue({
+			storage_class_yaml: storageClassYAMLFixture({ name: 'standard' }),
+		})
+		const adminListStorageClasses = vi.fn().mockResolvedValue({
+			storage_class_list: { items: [storageClassFixture({ name: 'admin-standard' })] },
+		})
+		const adminUpdateStorageClass = vi.fn().mockResolvedValue({
+			storage_class: storageClassFixture({ name: 'standard' }),
+		})
+		const adminUpdateStorageClassPolicy = vi.fn().mockResolvedValue({
+			storage_class: storageClassFixture({ name: 'standard', allowed_access_modes: ['ReadWriteMany'] }),
+		})
 		const createPVC = vi.fn().mockResolvedValue({
 			pvc: pvcFixture({ name: 'cache-data' }),
 		})
@@ -62,6 +93,14 @@ describe('viewer API adapter', () => {
 		})
 		const api = createViewerApi({
 			viewer: {
+				AdminCapabilities: adminCapabilities,
+				AdminCreateStorageClass: adminCreateStorageClass,
+				AdminDeleteStorageClass: adminDeleteStorageClass,
+				AdminDescribeStorageClass: adminDescribeStorageClass,
+				AdminGetStorageClassYAML: adminGetStorageClassYAML,
+				AdminListStorageClasses: adminListStorageClasses,
+				AdminUpdateStorageClass: adminUpdateStorageClass,
+				AdminUpdateStorageClassPolicy: adminUpdateStorageClassPolicy,
 				ListPVCs: listPVCs,
 				ListStorageClasses: listStorageClasses,
 				CreatePVC: createPVC,
@@ -85,6 +124,19 @@ describe('viewer API adapter', () => {
 		await expect(api.listStorageClasses()).resolves.toEqual([
 			expect.objectContaining({ name: 'standard' }),
 		])
+		await expect(api.adminCapabilities()).resolves.toEqual({ can_manage_storage_classes: true })
+		await expect(api.adminListStorageClasses()).resolves.toEqual([
+			expect.objectContaining({ name: 'admin-standard' }),
+		])
+		await expect(api.adminGetStorageClassYAML('standard')).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
+		await expect(api.adminDescribeStorageClass('standard')).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
+		await expect(api.adminCreateStorageClass({ yaml: 'kind: StorageClass' })).resolves.toEqual(expect.objectContaining({ name: 'created' }))
+		await expect(api.adminUpdateStorageClass('standard', { yaml: 'kind: StorageClass' })).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
+		await expect(api.adminUpdateStorageClassPolicy('standard', {
+			allowedAccessModes: ['ReadWriteMany'],
+			visibleInCreate: true,
+		})).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
+		await expect(api.adminDeleteStorageClass('standard')).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
 		await expect(api.createPVC({
 			namespace: 'default',
 			name: 'cache-data',
@@ -113,6 +165,34 @@ describe('viewer API adapter', () => {
 			pvc_name: 'mysql-data',
 		})
 		expect(listStorageClasses).toHaveBeenCalledWith({
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(adminCapabilities).toHaveBeenCalledWith({
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(adminListStorageClasses).toHaveBeenCalledWith({
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(adminGetStorageClassYAML).toHaveBeenCalledWith('standard', {
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(adminDescribeStorageClass).toHaveBeenCalledWith('standard', {
+			Authorization: 'Bearer test-kubeconfig',
+		})
+		expect(adminCreateStorageClass).toHaveBeenCalledWith({
+			Authorization: 'Bearer test-kubeconfig',
+			yaml: 'kind: StorageClass',
+		})
+		expect(adminUpdateStorageClass).toHaveBeenCalledWith('standard', {
+			Authorization: 'Bearer test-kubeconfig',
+			yaml: 'kind: StorageClass',
+		})
+		expect(adminUpdateStorageClassPolicy).toHaveBeenCalledWith('standard', {
+			Authorization: 'Bearer test-kubeconfig',
+			allowed_access_modes: ['ReadWriteMany'],
+			visible_in_create: true,
+		})
+		expect(adminDeleteStorageClass).toHaveBeenCalledWith('standard', {
 			Authorization: 'Bearer test-kubeconfig',
 		})
 		expect(createPVC).toHaveBeenCalledWith({

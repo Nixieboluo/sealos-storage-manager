@@ -3,7 +3,7 @@ import type { ViewerSelection } from '@/features/viewer/types/viewer'
 import { useSelector } from '@tanstack/react-store'
 import { createStore } from '@tanstack/store'
 
-export type ViewerView = 'volumes' | 'files' | 'trash'
+export type ViewerView = 'volumes' | 'files' | 'trash' | 'storageClasses'
 export type Locale = 'en' | 'zh'
 
 export interface ViewerUIState {

@@ -37,6 +37,41 @@ export function storageClassListQueryOptions(api: ViewerAPI = viewerApi) {
 	})
 }
 
+export function adminCapabilitiesQueryOptions(api: ViewerAPI = viewerApi) {
+	return queryOptions({
+		queryKey: viewerKeys.adminCapabilities(),
+		queryFn: () => api.adminCapabilities(),
+		staleTime: 60_000,
+	})
+}
+
+export function adminStorageClassListQueryOptions(api: ViewerAPI = viewerApi, enabled = true) {
+	return queryOptions({
+		queryKey: viewerKeys.adminStorageClasses(),
+		queryFn: () => api.adminListStorageClasses(),
+		enabled,
+		staleTime: 15_000,
+	})
+}
+
+export function adminStorageClassYAMLQueryOptions(name: string | null, api: ViewerAPI = viewerApi) {
+	return queryOptions({
+		queryKey: viewerKeys.adminStorageClassYAML(name ?? ''),
+		queryFn: () => api.adminGetStorageClassYAML(name ?? ''),
+		enabled: Boolean(name),
+		staleTime: 5_000,
+	})
+}
+
+export function adminStorageClassDescribeQueryOptions(name: string | null, api: ViewerAPI = viewerApi) {
+	return queryOptions({
+		queryKey: viewerKeys.adminStorageClassDescribe(name ?? ''),
+		queryFn: () => api.adminDescribeStorageClass(name ?? ''),
+		enabled: Boolean(name),
+		staleTime: 5_000,
+	})
+}
+
 export function viewerSessionQueryOptions({
 	api = viewerApi,
 	enabled = true,

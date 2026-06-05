@@ -1,7 +1,15 @@
 export const viewerKeys = {
 	all: ['viewer'] as const,
+	adminCapabilities: () => [...viewerKeys.all, 'admin', 'capabilities'] as const,
+	adminStorageClassDescribe: (name: string) => [...viewerKeys.all, 'admin', 'storage-classes', name, 'describe'] as const,
+	adminStorageClassYAML: (name: string) => [...viewerKeys.all, 'admin', 'storage-classes', name, 'yaml'] as const,
+	adminStorageClasses: () => [...viewerKeys.all, 'admin', 'storage-classes'] as const,
 	context: () => [...viewerKeys.all, 'context'] as const,
 	mutations: {
+		adminCreateStorageClass: () => [...viewerKeys.all, 'mutation', 'admin-create-storage-class'] as const,
+		adminDeleteStorageClass: () => [...viewerKeys.all, 'mutation', 'admin-delete-storage-class'] as const,
+		adminUpdateStorageClassPolicy: () => [...viewerKeys.all, 'mutation', 'admin-update-storage-class-policy'] as const,
+		adminUpdateStorageClass: () => [...viewerKeys.all, 'mutation', 'admin-update-storage-class'] as const,
 		closePodSession: () => [...viewerKeys.all, 'mutation', 'close-pod-session'] as const,
 		closeViewerSession: () => [...viewerKeys.all, 'mutation', 'close-viewer-session'] as const,
 		createPVC: () => [...viewerKeys.all, 'mutation', 'create-pvc'] as const,

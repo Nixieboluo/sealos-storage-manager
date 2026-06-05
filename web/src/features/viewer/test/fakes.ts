@@ -3,6 +3,8 @@ import type {
 	PodSession,
 	PVC,
 	StorageClass,
+	StorageClassDescribe,
+	StorageClassYAML,
 	ViewerAPI,
 	ViewerContext,
 	ViewerSession,
@@ -41,13 +43,38 @@ export function viewerContextFixture(overrides: Partial<ViewerContext> = {}): Vi
 
 export function storageClassFixture(overrides: Partial<StorageClass> = {}): StorageClass {
 	return {
+		allow_volume_expansion: true,
+		allowed_access_modes: ['ReadWriteOnce'],
+		annotation_status: 'ready',
+		creation_timestamp: '2026-05-14T10:00:00Z',
+		is_default: true,
 		name: 'standard',
 		provisioner: 'kubernetes.io/no-provisioner',
-		allow_volume_expansion: true,
-		volume_binding_mode: 'Immediate',
-		is_default: true,
 		reclaim_policy: 'Delete',
-		creation_timestamp: '2026-05-14T10:00:00Z',
+		visible_in_create: true,
+		volume_binding_mode: 'Immediate',
+		...overrides,
+	}
+}
+
+export function storageClassYAMLFixture(overrides: Partial<StorageClassYAML> = {}): StorageClassYAML {
+	return {
+		name: 'standard',
+		yaml: [
+			'apiVersion: storage.k8s.io/v1',
+			'kind: StorageClass',
+			'metadata:',
+			'  name: standard',
+			'provisioner: kubernetes.io/no-provisioner',
+		].join('\n'),
+		...overrides,
+	}
+}
+
+export function storageClassDescribeFixture(overrides: Partial<StorageClassDescribe> = {}): StorageClassDescribe {
+	return {
+		describe: 'Name: standard\nProvisioner: kubernetes.io/no-provisioner',
+		name: 'standard',
 		...overrides,
 	}
 }
@@ -59,8 +86,10 @@ export function viewerSessionFixture(overrides: Partial<ViewerSession> = {}): Vi
 		id: 'vs_1',
 		last_heartbeat_at: '2026-05-14T10:00:00Z',
 		mode: 'readwrite',
+		namespace: 'default',
 		pod_session_id: 'ps_1',
 		pod_status: 'creating',
+		pvc_name: 'data',
 		reason: '',
 		status: 'creating',
 		token_ready: false,
@@ -95,6 +124,7 @@ export function podSessionFixture(overrides: Partial<PodSession> = {}): PodSessi
 		pvc_name: 'data',
 		pvc_uid: 'pvc-uid',
 		reason: '',
+		runtime_version: 'default',
 		service_name: 'viewer-ps-1',
 		status: 'ready',
 		updated_at: '2026-05-14T10:00:05Z',
@@ -115,6 +145,19 @@ export function heartbeatFixture(overrides: Partial<Heartbeat> = {}): Heartbeat 
 
 export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerAPI {
 	return {
+		adminCapabilities: async () => ({ can_manage_storage_classes: false }),
+		adminCreateStorageClass: async () => storageClassFixture(),
+		adminDeleteStorageClass: async name => storageClassFixture({ name }),
+		adminDescribeStorageClass: async name => storageClassDescribeFixture({ name }),
+		adminGetStorageClassYAML: async name => storageClassYAMLFixture({ name }),
+		adminListStorageClasses: async () => [storageClassFixture()],
+		adminUpdateStorageClassPolicy: async (name, input) => storageClassFixture({
+			name,
+			allowed_access_modes: input.allowedAccessModes,
+			visible_in_create: input.visibleInCreate,
+			annotation_status: input.visibleInCreate ? 'ready' : 'hidden',
+		}),
+		adminUpdateStorageClass: async name => storageClassFixture({ name }),
 		closePodSession: async () => podSessionFixture({ status: 'terminated' }),
 		closeViewerSession: async id => viewerSessionFixture({ id, status: 'closed' }),
 		createPVC: async input =>

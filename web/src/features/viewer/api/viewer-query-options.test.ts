@@ -3,7 +3,16 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createViewerSessionMutationOptions, heartbeatViewerSessionMutationOptions } from '@/features/viewer/api/viewer-mutations'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
-import { pvcListQueryOptions, storageClassListQueryOptions, viewerContextQueryOptions, viewerSessionQueryOptions } from '@/features/viewer/api/viewer-query-options'
+import {
+	adminCapabilitiesQueryOptions,
+	adminStorageClassDescribeQueryOptions,
+	adminStorageClassListQueryOptions,
+	adminStorageClassYAMLQueryOptions,
+	pvcListQueryOptions,
+	storageClassListQueryOptions,
+	viewerContextQueryOptions,
+	viewerSessionQueryOptions,
+} from '@/features/viewer/api/viewer-query-options'
 import { createFakeViewerAPI } from '@/features/viewer/test/fakes'
 
 const mutationContext = {
@@ -59,6 +68,22 @@ describe('viewer query options', () => {
 			queryKey: options.queryKey,
 			signal: new AbortController().signal,
 		})).resolves.toHaveLength(1)
+	})
+
+	it('uses stable admin StorageClass query keys', async () => {
+		const api = createFakeViewerAPI()
+
+		expect(adminCapabilitiesQueryOptions(api).queryKey).toEqual(viewerKeys.adminCapabilities())
+		expect(adminStorageClassListQueryOptions(api).queryKey).toEqual(viewerKeys.adminStorageClasses())
+		expect(adminStorageClassYAMLQueryOptions('standard', api).queryKey).toEqual(viewerKeys.adminStorageClassYAML('standard'))
+		expect(adminStorageClassDescribeQueryOptions('standard', api).queryKey).toEqual(viewerKeys.adminStorageClassDescribe('standard'))
+
+		await expect(adminCapabilitiesQueryOptions(api).queryFn?.({
+			client: mutationContext.client,
+			meta: undefined,
+			queryKey: viewerKeys.adminCapabilities(),
+			signal: new AbortController().signal,
+		})).resolves.toEqual({ can_manage_storage_classes: false })
 	})
 
 	it('polls viewer sessions only while creating', () => {

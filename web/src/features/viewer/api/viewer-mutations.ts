@@ -5,6 +5,9 @@ import type {
 	DeletePVCInput,
 	ExpandPVCInput,
 	PVC,
+	StorageClass,
+	StorageClassPolicyInput,
+	StorageClassYAMLInput,
 	ViewerAPI,
 	ViewerSession,
 } from '@/features/viewer/types/viewer'
@@ -84,6 +87,80 @@ export function createPVCMutationOptions(
 			void queryClient.invalidateQueries({
 				queryKey: viewerKeys.pvcs(variables.namespace),
 			})
+		},
+	})
+}
+
+export function adminCreateStorageClassMutationOptions(
+	queryClient: QueryClient,
+	api: ViewerAPI = viewerApi,
+) {
+	return mutationOptions({
+		mutationKey: viewerKeys.mutations.adminCreateStorageClass(),
+		mutationFn: (input: StorageClassYAMLInput) => api.adminCreateStorageClass(input),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClasses() })
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.storageClasses() })
+		},
+	})
+}
+
+export function adminUpdateStorageClassMutationOptions(
+	queryClient: QueryClient,
+	api: ViewerAPI = viewerApi,
+) {
+	return mutationOptions({
+		mutationKey: viewerKeys.mutations.adminUpdateStorageClass(),
+		mutationFn: (input: { name: string } & StorageClassYAMLInput) =>
+			api.adminUpdateStorageClass(input.name, { yaml: input.yaml }),
+		onSuccess: (storageClass: StorageClass) => {
+			queryClient.setQueryData<StorageClass[]>(
+				viewerKeys.adminStorageClasses(),
+				current => (current ?? []).map(item => item.name === storageClass.name ? storageClass : item),
+			)
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClassYAML(storageClass.name) })
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClasses() })
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.storageClasses() })
+		},
+	})
+}
+
+export function adminUpdateStorageClassPolicyMutationOptions(
+	queryClient: QueryClient,
+	api: ViewerAPI = viewerApi,
+) {
+	return mutationOptions({
+		mutationKey: viewerKeys.mutations.adminUpdateStorageClassPolicy(),
+		mutationFn: (input: { name: string } & StorageClassPolicyInput) =>
+			api.adminUpdateStorageClassPolicy(input.name, {
+				allowedAccessModes: input.allowedAccessModes,
+				visibleInCreate: input.visibleInCreate,
+			}),
+		onSuccess: (storageClass: StorageClass) => {
+			queryClient.setQueryData<StorageClass[]>(
+				viewerKeys.adminStorageClasses(),
+				current => (current ?? []).map(item => item.name === storageClass.name ? storageClass : item),
+			)
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClassYAML(storageClass.name) })
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClasses() })
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.storageClasses() })
+		},
+	})
+}
+
+export function adminDeleteStorageClassMutationOptions(
+	queryClient: QueryClient,
+	api: ViewerAPI = viewerApi,
+) {
+	return mutationOptions({
+		mutationKey: viewerKeys.mutations.adminDeleteStorageClass(),
+		mutationFn: (name: string) => api.adminDeleteStorageClass(name),
+		onSuccess: (storageClass) => {
+			queryClient.setQueryData<StorageClass[]>(
+				viewerKeys.adminStorageClasses(),
+				current => (current ?? []).filter(item => item.name !== storageClass.name),
+			)
+			void queryClient.invalidateQueries({ queryKey: viewerKeys.storageClasses() })
 		},
 	})
 }

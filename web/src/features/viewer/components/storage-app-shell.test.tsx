@@ -5,8 +5,32 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ViewerApiError } from '@/features/viewer/api/viewer-error'
 import { StorageAppShell } from '@/features/viewer/components/storage-app-shell'
 import { viewerUIStore } from '@/features/viewer/stores/viewer-ui-store'
-import { createFakeViewerAPI, pvcFixture, viewerSessionFixture, viewerTokenFixture } from '@/features/viewer/test/fakes'
+import {
+	createFakeViewerAPI,
+	pvcFixture,
+	storageClassDescribeFixture,
+	storageClassFixture,
+	storageClassYAMLFixture,
+	viewerSessionFixture,
+	viewerTokenFixture,
+} from '@/features/viewer/test/fakes'
 import { renderWithProviders } from '@/test/render'
+
+vi.mock('@monaco-editor/react', () => ({
+	default: ({
+		onChange,
+		value,
+	}: {
+		onChange?: (value?: string) => void
+		value?: string
+	}) => (
+		<textarea
+			aria-label="Monaco editor"
+			onChange={event => onChange?.(event.target.value)}
+			value={value ?? ''}
+		/>
+	),
+}))
 
 describe('storageAppShell', () => {
 	beforeEach(() => {
@@ -79,7 +103,81 @@ describe('storageAppShell', () => {
 			namespace: 'ns-admin',
 			capacity: '5Gi',
 			capacityBytes: 5 * 1024 * 1024 * 1024,
+			accessModes: ['ReadWriteOnce'],
+			storageClassName: 'standard',
 		})))
+	})
+
+	it('limits PVC access modes to the selected StorageClass policy', async () => {
+		const user = userEvent.setup()
+		const createPVC = vi.fn().mockResolvedValue(pvcFixture({ name: 'shared-data' }))
+		const api = createFakeViewerAPI({
+			createPVC,
+			listPVCs: vi.fn().mockResolvedValue([]),
+			listStorageClasses: vi.fn().mockResolvedValue([
+				storageClassFixture({
+					name: 'standard',
+					allowed_access_modes: ['ReadWriteOnce'],
+				}),
+				storageClassFixture({
+					name: 'shared',
+					allowed_access_modes: ['ReadWriteMany'],
+					is_default: false,
+				}),
+				storageClassFixture({
+					name: 'hidden',
+					allowed_access_modes: ['ReadWriteMany'],
+					annotation_status: 'hidden',
+					is_default: false,
+					visible_in_create: false,
+				}),
+			]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
+		await user.type(screen.getByLabelText('Name'), 'shared-data')
+		await user.click(screen.getByRole('combobox', { name: /storage class/i }))
+		await user.click(await screen.findByRole('option', { name: 'shared' }))
+		expect(screen.queryByRole('option', { name: 'hidden' })).not.toBeInTheDocument()
+		await waitFor(() => expect(screen.getByRole('combobox', { name: /access modes/i })).toHaveTextContent('ReadWriteMany'))
+		await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+		await waitFor(() => expect(createPVC).toHaveBeenCalledWith(expect.objectContaining({
+			accessModes: ['ReadWriteMany'],
+			storageClassName: 'shared',
+		})))
+	})
+
+	it('disables PVC creation when no StorageClass is visible for create', async () => {
+		const user = userEvent.setup()
+		const createPVC = vi.fn()
+		const api = createFakeViewerAPI({
+			createPVC,
+			listPVCs: vi.fn().mockResolvedValue([]),
+			listStorageClasses: vi.fn().mockResolvedValue([
+				storageClassFixture({
+					allowed_access_modes: [],
+					annotation_status: 'invalid',
+					visible_in_create: true,
+				}),
+				storageClassFixture({
+					name: 'hidden',
+					annotation_status: 'hidden',
+					visible_in_create: false,
+				}),
+			]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
+		await user.type(screen.getByLabelText('Name'), 'cache-data')
+
+		expect(screen.getByText(/no storageclass is available/i)).toBeInTheDocument()
+		expect(screen.getByRole('button', { name: /^create$/i })).toBeDisabled()
+		expect(createPVC).not.toHaveBeenCalled()
 	})
 
 	it('orders the create PVC form as storage class before access mode', async () => {
@@ -111,6 +209,107 @@ describe('storageAppShell', () => {
 		renderWithProviders(<StorageAppShell api={api} />)
 
 		expect(await screen.findByText(/permission to access/i)).toBeInTheDocument()
+	})
+
+	it('shows admin StorageClass management only for capable users and opens describe output', async () => {
+		const user = userEvent.setup()
+		const adminDescribeStorageClass = vi.fn().mockResolvedValue(storageClassDescribeFixture({
+			describe: 'Name: standard\nProvisioner: kubernetes.io/no-provisioner',
+		}))
+		const api = createFakeViewerAPI({
+			adminCapabilities: vi.fn().mockResolvedValue({ can_manage_storage_classes: true }),
+			adminDescribeStorageClass,
+			adminListStorageClasses: vi.fn().mockResolvedValue([
+				storageClassFixture({ name: 'standard' }),
+			]),
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: 'StorageClasses' }))
+		expect(await screen.findByRole('heading', { name: 'StorageClasses' })).toBeInTheDocument()
+		expect(screen.getByText('standard')).toBeInTheDocument()
+
+		await user.click(screen.getByRole('button', { name: 'Describe' }))
+
+		await waitFor(() => expect(adminDescribeStorageClass).toHaveBeenCalledWith('standard'))
+		expect(await screen.findByDisplayValue(/Name: standard/)).toBeInTheDocument()
+	})
+
+	it('creates, edits, and deletes StorageClasses through the admin dialogs', async () => {
+		const user = userEvent.setup()
+		const adminCreateStorageClass = vi.fn().mockResolvedValue(storageClassFixture({ name: 'created' }))
+		const adminDeleteStorageClass = vi.fn().mockResolvedValue(storageClassFixture({ name: 'standard' }))
+		const adminGetStorageClassYAML = vi.fn().mockResolvedValue(storageClassYAMLFixture({
+			name: 'standard',
+			yaml: 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: standard\nprovisioner: test.io/standard\n',
+		}))
+		const adminUpdateStorageClassPolicy = vi.fn().mockResolvedValue(storageClassFixture({
+			name: 'standard',
+			allowed_access_modes: ['ReadWriteMany'],
+		}))
+		const adminUpdateStorageClass = vi.fn().mockResolvedValue(storageClassFixture({ name: 'standard' }))
+		const api = createFakeViewerAPI({
+			adminCapabilities: vi.fn().mockResolvedValue({ can_manage_storage_classes: true }),
+			adminCreateStorageClass,
+			adminDeleteStorageClass,
+			adminGetStorageClassYAML,
+			adminListStorageClasses: vi.fn().mockResolvedValue([
+				storageClassFixture({
+					name: 'standard',
+					allow_volume_expansion: true,
+					reclaim_policy: 'Retain',
+					volume_binding_mode: 'WaitForFirstConsumer',
+				}),
+			]),
+			adminUpdateStorageClass,
+			adminUpdateStorageClassPolicy,
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await user.click(await screen.findByRole('button', { name: 'StorageClasses' }))
+		expect(await screen.findByRole('columnheader', { name: 'Reclaim policy' })).toBeInTheDocument()
+		expect(screen.getByRole('columnheader', { name: 'Volume binding mode' })).toBeInTheDocument()
+		expect(screen.getByRole('columnheader', { name: 'Allow volume expansion' })).toBeInTheDocument()
+		expect(await screen.findByText('Retain')).toBeInTheDocument()
+		expect(screen.getByText('WaitForFirstConsumer')).toBeInTheDocument()
+		expect(screen.getByText('Yes')).toBeInTheDocument()
+		await user.click(await screen.findByRole('button', { name: 'Create StorageClass' }))
+		const createEditor = await screen.findByLabelText('Monaco editor')
+		await user.clear(createEditor)
+		await user.type(createEditor, 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: created\nprovisioner: test.io/created\n')
+		await user.click(screen.getByRole('button', { name: 'Save' }))
+		await waitFor(() => expect(adminCreateStorageClass).toHaveBeenCalledWith(expect.objectContaining({
+			yaml: expect.stringContaining('name: created'),
+		})))
+
+		await user.click(await screen.findByRole('button', { name: 'Edit' }))
+		const editEditor = await screen.findByLabelText('Monaco editor')
+		expect(screen.getByRole('dialog')).toHaveClass('h-[88vh]')
+		await waitFor(() => expect((editEditor as HTMLTextAreaElement).value).toContain('name: standard'))
+		await user.clear(editEditor)
+		await user.type(editEditor, 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: standard\nprovisioner: test.io/updated\n')
+		await user.click(screen.getByRole('button', { name: 'Save' }))
+		await waitFor(() => expect(adminUpdateStorageClass).toHaveBeenCalledWith('standard', expect.objectContaining({
+			yaml: expect.stringContaining('test.io/updated'),
+		})))
+
+		await user.click(await screen.findByRole('button', { name: 'Policy' }))
+		await user.click(screen.getByRole('checkbox', { name: 'ReadWriteOnce' }))
+		await user.click(screen.getByRole('checkbox', { name: 'ReadWriteMany' }))
+		await user.click(screen.getByRole('button', { name: 'Save' }))
+		await waitFor(() => expect(adminUpdateStorageClassPolicy).toHaveBeenCalledWith('standard', {
+			allowedAccessModes: ['ReadWriteMany'],
+			visibleInCreate: true,
+		}))
+
+		await user.click(await screen.findByRole('button', { name: 'Delete' }))
+		await user.type(screen.getByLabelText('Type PVC name to confirm'), 'standard')
+		await user.click(screen.getByRole('button', { name: 'Delete' }))
+		await waitFor(() => expect(adminDeleteStorageClass).toHaveBeenCalledWith('standard'))
 	})
 
 	it('stops restarting the viewer flow after token recovery is exhausted', async () => {

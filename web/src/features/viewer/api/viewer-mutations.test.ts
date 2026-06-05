@@ -2,6 +2,10 @@ import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+	adminCreateStorageClassMutationOptions,
+	adminDeleteStorageClassMutationOptions,
+	adminUpdateStorageClassMutationOptions,
+	adminUpdateStorageClassPolicyMutationOptions,
 	closePodSessionMutationOptions,
 	closeViewerSessionMutationOptions,
 	createPVCMutationOptions,
@@ -9,7 +13,7 @@ import {
 	expandPVCMutationOptions,
 } from '@/features/viewer/api/viewer-mutations'
 import { viewerKeys } from '@/features/viewer/api/viewer-query-keys'
-import { createFakeViewerAPI, pvcFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
+import { createFakeViewerAPI, pvcFixture, storageClassFixture, viewerSessionFixture } from '@/features/viewer/test/fakes'
 
 const mutationContext = {
 	client: new QueryClient(),
@@ -57,6 +61,7 @@ describe('viewer mutation options', () => {
 			capacity: '5Gi',
 			capacityBytes: 5 * 1024 * 1024 * 1024,
 			accessModes: ['ReadWriteOnce'],
+			storageClassName: 'standard',
 		}
 
 		const context = await options.onMutate?.(input, mutationContext)
@@ -90,6 +95,60 @@ describe('viewer mutation options', () => {
 		options.onError?.(new Error('failed'), input, context, mutationContext)
 
 		expect(queryClient.getQueryData(key)).toEqual(original)
+	})
+
+	it('invalidates user and admin StorageClass lists after admin mutations', async () => {
+		const queryClient = new QueryClient()
+		const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+		const api = createFakeViewerAPI()
+
+		adminCreateStorageClassMutationOptions(queryClient, api).onSuccess?.(
+			storageClassFixture({ name: 'created' }),
+			{ yaml: 'kind: StorageClass' },
+			undefined,
+			mutationContext,
+		)
+
+		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: viewerKeys.adminStorageClasses() })
+		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: viewerKeys.storageClasses() })
+	})
+
+	it('updates and removes admin StorageClass cache entries', () => {
+		const queryClient = new QueryClient()
+		queryClient.setQueryData(viewerKeys.adminStorageClasses(), [
+			{ name: 'standard' },
+			{ name: 'shared' },
+		])
+
+		adminUpdateStorageClassMutationOptions(queryClient, createFakeViewerAPI()).onSuccess?.(
+			{ name: 'standard', provisioner: 'updated' } as never,
+			{ name: 'standard', yaml: 'kind: StorageClass' },
+			undefined,
+			mutationContext,
+		)
+		expect(queryClient.getQueryData(viewerKeys.adminStorageClasses())).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: 'standard', provisioner: 'updated' }),
+		]))
+
+		adminUpdateStorageClassPolicyMutationOptions(queryClient, createFakeViewerAPI()).onSuccess?.(
+			{ name: 'shared', allowed_access_modes: ['ReadWriteMany'], visible_in_create: true } as never,
+			{ name: 'shared', allowedAccessModes: ['ReadWriteMany'], visibleInCreate: true },
+			undefined,
+			mutationContext,
+		)
+		expect(queryClient.getQueryData(viewerKeys.adminStorageClasses())).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: 'shared', allowed_access_modes: ['ReadWriteMany'] }),
+		]))
+
+		adminDeleteStorageClassMutationOptions(queryClient, createFakeViewerAPI()).onSuccess?.(
+			{ name: 'standard' } as never,
+			'standard',
+			undefined,
+			mutationContext,
+		)
+		expect(queryClient.getQueryData(viewerKeys.adminStorageClasses())).toEqual([
+			expect.objectContaining({ name: 'shared' }),
+		])
 	})
 
 	it('optimistically expands PVCs and rolls back on error', async () => {

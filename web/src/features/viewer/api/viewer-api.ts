@@ -1,4 +1,5 @@
 import type {
+	AdminCapabilities,
 	CreatePVCInput,
 	CreateViewerSessionInput,
 	DeletePVCInput,
@@ -8,6 +9,10 @@ import type {
 	PodSession,
 	PVC,
 	StorageClass,
+	StorageClassDescribe,
+	StorageClassPolicyInput,
+	StorageClassYAML,
+	StorageClassYAMLInput,
 	ViewerAPI,
 	ViewerContext,
 	ViewerSession,
@@ -55,6 +60,106 @@ export function createViewerApi(client = new Client(apiTarget())): ViewerAPI {
 	}
 
 	return {
+		async adminCapabilities(): Promise<AdminCapabilities> {
+			try {
+				const response = await client.viewer.AdminCapabilities({
+					Authorization: authorization(),
+				})
+				return response.admin_capabilities
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminCreateStorageClass(input: StorageClassYAMLInput): Promise<StorageClass> {
+			try {
+				const response = await client.viewer.AdminCreateStorageClass({
+					Authorization: authorization(),
+					yaml: input.yaml,
+				})
+				return response.storage_class
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminDeleteStorageClass(name: string): Promise<StorageClass> {
+			try {
+				const response = await client.viewer.AdminDeleteStorageClass(name, {
+					Authorization: authorization(),
+				})
+				return response.storage_class
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminDescribeStorageClass(name: string): Promise<StorageClassDescribe> {
+			try {
+				const response = await client.viewer.AdminDescribeStorageClass(name, {
+					Authorization: authorization(),
+				})
+				return response.storage_class_describe
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminGetStorageClassYAML(name: string): Promise<StorageClassYAML> {
+			try {
+				const response = await client.viewer.AdminGetStorageClassYAML(name, {
+					Authorization: authorization(),
+				})
+				return response.storage_class_yaml
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminListStorageClasses(): Promise<StorageClass[]> {
+			try {
+				const response = await client.viewer.AdminListStorageClasses({
+					Authorization: authorization(),
+				})
+				return response.storage_class_list.items
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminUpdateStorageClass(name: string, input: StorageClassYAMLInput): Promise<StorageClass> {
+			try {
+				const response = await client.viewer.AdminUpdateStorageClass(name, {
+					Authorization: authorization(),
+					yaml: input.yaml,
+				})
+				return response.storage_class
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
+		async adminUpdateStorageClassPolicy(name: string, input: StorageClassPolicyInput): Promise<StorageClass> {
+			try {
+				const response = await client.viewer.AdminUpdateStorageClassPolicy(name, {
+					Authorization: authorization(),
+					visible_in_create: input.visibleInCreate,
+					allowed_access_modes: input.allowedAccessModes,
+				})
+				return response.storage_class
+			}
+			catch (error) {
+				throw normalizeViewerError(error)
+			}
+		},
+
 		async closePodSession(podSessionID: string): Promise<PodSession> {
 			try {
 				const response = await client.viewer.ClosePodSession(podSessionID, {
