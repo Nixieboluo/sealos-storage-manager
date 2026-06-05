@@ -105,7 +105,7 @@ func TestEnsurePodSessionCreatesResources(t *testing.T) {
 	}
 	assertRuntimeVersionLabel(t, ingress.Labels, service.runtimeVersion)
 	assertOwnedByPod(t, ingress.OwnerReferences, pod)
-	assertIngressPaths(t, ingress, []string{"/api/login", "/api/raw", "/api/resources", "/api/tus"})
+	assertIngressPaths(t, ingress, []string{"/api/login", "/api/raw", "/api/resources", "/api/tus", "/api/usage"})
 	if ingress.Annotations["nginx.ingress.kubernetes.io/enable-cors"] != "true" {
 		t.Fatalf("ingress CORS annotations missing: %#v", ingress.Annotations)
 	}

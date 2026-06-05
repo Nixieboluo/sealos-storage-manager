@@ -60,6 +60,7 @@ var fileBrowserAllowedIngressPaths = []string{
 	"/api/raw",
 	"/api/resources",
 	"/api/tus",
+	"/api/usage",
 }
 
 var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -420,7 +421,9 @@ func (s *PodService) ReconcileViewerPods(ctx context.Context, namespace string) 
 		}
 		if existing, ok := s.store.GetPodSessionIncludingExpired(podSessionID); ok {
 			if existing.RuntimeVersion == s.runtimeVersion {
-				_, _ = s.SyncPodStatus(ctx, existing)
+				if synced, err := s.SyncPodStatus(ctx, existing); err == nil {
+					s.store.PutPodSession(synced)
+				}
 				continue
 			}
 		}
