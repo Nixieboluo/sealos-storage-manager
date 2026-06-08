@@ -387,24 +387,9 @@ func TestCommittedHookScriptAcceptsSpacedJSON(t *testing.T) {
 func TestDeployChartValuesEmbedValidViewerConfig(t *testing.T) {
 	t.Parallel()
 
-	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "deploy", "values.yaml")) //nolint:gosec // Test reads a committed fixture.
-	if err != nil {
-		t.Fatalf("read deploy values: %v", err)
-	}
-	var values struct {
-		Backend struct {
-			Config struct {
-				ViewerYAML string `yaml:"viewerYaml"`
-			} `yaml:"config"`
-		} `yaml:"backend"`
-	}
-	if err := yaml.Unmarshal(data, &values); err != nil {
-		t.Fatalf("parse deploy values: %v", err)
-	}
-	viewerYAML := values.Backend.Config.ViewerYAML
+	viewerYAML := deployViewerYAML(t)
 	if strings.TrimSpace(viewerYAML) == "" {
-		t.Fatal("deploy values missing backend.config.viewerYaml")
+		t.Fatal("deploy chart missing viewer.yaml")
 	}
 	if _, err := Load([]byte(viewerYAML)); err != nil {
 		t.Fatalf("embedded deploy viewer.yaml error = %v", err)
@@ -417,6 +402,26 @@ func TestDeployChartValuesEmbedValidViewerConfig(t *testing.T) {
 		if strings.Contains(viewerYAML, forbidden) {
 			t.Fatalf("deploy config contains %q", forbidden)
 		}
+	}
+}
+
+func TestDeployChartDerivesPublicHostsFromCloudDomain(t *testing.T) {
+	t.Parallel()
+
+	viewerYAML := deployViewerYAML(t,
+		"--set", "global.cloudDomain=cloud.sealos.test",
+		"--set", "global.cloudPort=7443",
+		"--set", "web.publicHost=storage.cloud.sealos.test",
+		"--set", "backend.config.viewer.ingress.hostPrefix=pvc-viewer",
+	)
+	if !strings.Contains(viewerYAML, `backend_verify_url: "https://storage.cloud.sealos.test:7443/internal/filebrowser-hook/verify"`) {
+		t.Fatalf("viewer.yaml missing derived backend verify URL:\n%s", viewerYAML)
+	}
+	if !strings.Contains(viewerYAML, `host_template: "pvc-viewer-{{ .PodSessionID }}.cloud.sealos.test"`) {
+		t.Fatalf("viewer.yaml missing derived host template:\n%s", viewerYAML)
+	}
+	if strings.Contains(viewerYAML, "example.com") {
+		t.Fatalf("viewer.yaml contains placeholder domain:\n%s", viewerYAML)
 	}
 }
 
@@ -502,17 +507,52 @@ func TestDeployStorageClassAdminManifest(t *testing.T) {
 
 func renderDeployChart(t *testing.T) []byte {
 	t.Helper()
+	return renderDeployChartWithArgs(t)
+}
+
+func renderDeployChartWithArgs(t *testing.T, args ...string) []byte {
+	t.Helper()
 
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skipf("helm not installed: %v", err)
 	}
 	root := repoRoot(t)
-	cmd := exec.Command("helm", "template", "sealos-storage-manager", filepath.Join(root, "deploy"), "--namespace", "sealos-storage-manager") //nolint:gosec // Test renders committed chart path.
+	helmArgs := make([]string, 0, 5+len(args))
+	helmArgs = append(helmArgs, "template", "sealos-storage-manager", filepath.Join(root, "deploy"), "--namespace", "sealos-storage-manager")
+	helmArgs = append(helmArgs, args...)
+	cmd := exec.Command("helm", helmArgs...) //nolint:gosec // Test renders committed chart path.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("render deploy chart: %v\n%s", err, output)
 	}
 	return output
+}
+
+func deployViewerYAML(t *testing.T, args ...string) string {
+	t.Helper()
+
+	data := renderDeployChartWithArgs(t, args...)
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	for {
+		var document struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Data map[string]string `yaml:"data"`
+		}
+		if err := decoder.Decode(&document); err != nil {
+			if err != io.EOF {
+				t.Fatalf("parse rendered deploy chart: %v", err)
+			}
+			break
+		}
+		if document.Kind == "ConfigMap" && document.Metadata.Name == "viewer-backend-config" {
+			return document.Data["viewer.yaml"]
+		}
+	}
+	t.Fatal("rendered deploy chart missing viewer-backend-config ConfigMap")
+	return ""
 }
 
 func requireRule(t *testing.T, rules []deployRule, apiGroup string, resource string, verbs []string) {

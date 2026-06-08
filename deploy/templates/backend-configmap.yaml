@@ -7,4 +7,115 @@ metadata:
     {{- include "sealos-storage-manager.labels" . | nindent 4 }}
 data:
   viewer.yaml: |
-{{ .Values.backend.config.viewerYaml | indent 4 }}
+    admin:
+      allowed_user_ids:
+{{- range .Values.backend.config.admin.allowedUserIds }}
+        - {{ . | quote }}
+{{- end }}
+      storage_class_service_account_name: {{ .Values.backend.config.admin.storageClassServiceAccountName | quote }}
+
+    viewer:
+      backend_verify_url: {{ include "sealos-storage-manager.backendVerifyURL" . | quote }}
+      hook_client_token: {{ .Values.backend.config.viewer.hookClientToken | quote }}
+      hook_script: |
+        #!/bin/sh
+        set -eu
+
+        fail() {
+          echo "hook.action=block"
+          exit 0
+        }
+
+        case "${PASSWORD:-}" in
+          *.*) ;;
+          *) fail ;;
+        esac
+
+        case "${USERNAME:-}" in
+          vs_[A-Za-z0-9_-]*) ;;
+          *) fail ;;
+        esac
+
+        AUTH_REQUEST_ID="${PASSWORD%%.*}"
+        SECRET="${PASSWORD#*.}"
+        case "$AUTH_REQUEST_ID" in
+          ar_[A-Za-z0-9_-]*) ;;
+          *) fail ;;
+        esac
+        PASSWORD_HASH="$(printf "%s" "$SECRET" | sha256sum | awk '{print $1}')"
+
+        case "${POD_SESSION_ID:-}" in
+          ps_[A-Za-z0-9_-]*) ;;
+          *) fail ;;
+        esac
+
+        BODY="$(printf '{"pod_session_id":"%s","viewer_pod_name":"%s","username":"%s","auth_request_id":"%s","password_hash":"%s"}' \
+          "$POD_SESSION_ID" \
+          "$VIEWER_POD_NAME" \
+          "$USERNAME" \
+          "$AUTH_REQUEST_ID" \
+          "$PASSWORD_HASH")"
+
+        RESPONSE="$(curl -fsS --max-time 2 \
+          -H "Authorization: Bearer ${HOOK_CLIENT_TOKEN:-}" \
+          -H "Content-Type: application/json" \
+          -d "$BODY" \
+          "${BACKEND_VERIFY_URL:-}")" || fail
+
+        echo "$RESPONSE" | grep -q '"allow"[[:space:]]*:[[:space:]]*true' || fail
+
+        echo "hook.action=auth"
+        echo "user.scope=/"
+        echo "user.hideDotfiles=false"
+        echo "user.perm.admin=false"
+        echo "user.perm.execute=false"
+        echo "user.perm.share=false"
+        echo "user.perm.download=true"
+        if echo "$RESPONSE" | grep -q '"create"[[:space:]]*:[[:space:]]*true'; then
+          echo "user.perm.create=true"
+          echo "user.perm.rename=true"
+          echo "user.perm.modify=true"
+          echo "user.perm.delete=true"
+        else
+          echo "user.perm.create=false"
+          echo "user.perm.rename=false"
+          echo "user.perm.modify=false"
+          echo "user.perm.delete=false"
+        fi
+      filebrowser:
+        image: {{ .Values.backend.config.viewer.filebrowser.image | quote }}
+        binary_path: {{ .Values.backend.config.viewer.filebrowser.binaryPath | quote }}
+        port: {{ .Values.backend.config.viewer.filebrowser.port }}
+        token_ttl: {{ .Values.backend.config.viewer.filebrowser.tokenTtl | quote }}
+        login_timeout: {{ .Values.backend.config.viewer.filebrowser.loginTimeout | quote }}
+      pod:
+        service_account_name: {{ .Values.backend.config.viewer.pod.serviceAccountName | quote }}
+        mount_path: {{ .Values.backend.config.viewer.pod.mountPath | quote }}
+        database_path: {{ .Values.backend.config.viewer.pod.databasePath | quote }}
+        cpu_request: {{ .Values.backend.config.viewer.pod.cpuRequest | quote }}
+        memory_request: {{ .Values.backend.config.viewer.pod.memoryRequest | quote }}
+        cpu_limit: {{ .Values.backend.config.viewer.pod.cpuLimit | quote }}
+        memory_limit: {{ .Values.backend.config.viewer.pod.memoryLimit | quote }}
+      service:
+        type: {{ .Values.backend.config.viewer.service.type | quote }}
+        port: {{ .Values.backend.config.viewer.service.port }}
+      ingress:
+        class_name: {{ .Values.backend.config.viewer.ingress.className | quote }}
+        host_template: {{ include "sealos-storage-manager.viewerHostTemplate" . | quote }}
+        tls_secret_name: {{ .Values.backend.config.viewer.ingress.tlsSecretName | quote }}
+
+    observability:
+      service_name: {{ .Values.backend.config.observability.serviceName | quote }}
+      logs:
+        exporter: {{ .Values.backend.config.observability.logs.exporter | quote }}
+        level: {{ .Values.backend.config.observability.logs.level | quote }}
+      traces:
+        exporter: {{ .Values.backend.config.observability.traces.exporter | quote }}
+        endpoint: {{ .Values.backend.config.observability.traces.endpoint | quote }}
+        sample_ratio: {{ .Values.backend.config.observability.traces.sampleRatio }}
+        batch_timeout: {{ .Values.backend.config.observability.traces.batchTimeout | quote }}
+        export_timeout: {{ .Values.backend.config.observability.traces.exportTimeout | quote }}
+
+    debug:
+      enabled: {{ .Values.backend.config.debug.enabled }}
+      forced_namespace: {{ .Values.backend.config.debug.forcedNamespace | quote }}

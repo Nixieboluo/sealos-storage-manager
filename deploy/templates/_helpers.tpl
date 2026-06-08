@@ -52,3 +52,41 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- define "sealos-storage-manager.backendURL" -}}
 {{- printf "http://%s.%s.svc.cluster.local" .Values.backend.service.name (include "sealos-storage-manager.namespace" .) -}}
 {{- end -}}
+
+{{- define "sealos-storage-manager.scheme" -}}
+{{- if eq (toString .Values.global.disableHttps) "true" -}}http{{- else -}}https{{- end -}}
+{{- end -}}
+
+{{- define "sealos-storage-manager.publicPort" -}}
+{{- $scheme := include "sealos-storage-manager.scheme" . -}}
+{{- $port := toString .Values.global.cloudPort -}}
+{{- if eq $scheme "http" -}}
+{{- $port = toString .Values.global.httpPort -}}
+{{- end -}}
+{{- if or (and (eq $scheme "https") (or (eq $port "") (eq $port "443"))) (and (eq $scheme "http") (or (eq $port "") (eq $port "80"))) -}}
+{{- "" -}}
+{{- else -}}
+{{- $port -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "sealos-storage-manager.publicPortSuffix" -}}
+{{- $port := include "sealos-storage-manager.publicPort" . -}}
+{{- if $port -}}:{{ $port }}{{- end -}}
+{{- end -}}
+
+{{- define "sealos-storage-manager.webHost" -}}
+{{- default (printf "storage-manager.%s" .Values.global.cloudDomain) .Values.web.publicHost -}}
+{{- end -}}
+
+{{- define "sealos-storage-manager.webOrigin" -}}
+{{- include "sealos-storage-manager.scheme" . -}}://{{ include "sealos-storage-manager.webHost" . }}{{ include "sealos-storage-manager.publicPortSuffix" . }}
+{{- end -}}
+
+{{- define "sealos-storage-manager.viewerHostTemplate" -}}
+{{- printf "%s-{{ .PodSessionID }}.%s" .Values.backend.config.viewer.ingress.hostPrefix .Values.global.cloudDomain -}}
+{{- end -}}
+
+{{- define "sealos-storage-manager.backendVerifyURL" -}}
+{{- include "sealos-storage-manager.webOrigin" . -}}/internal/filebrowser-hook/verify
+{{- end -}}

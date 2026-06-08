@@ -217,15 +217,27 @@ Install or upgrade the chart:
 helm upgrade --install sealos-storage-manager deploy \
   --namespace sealos-storage-manager \
   --create-namespace \
+  --set global.cloudDomain=cloud.example.org \
   --set backend.image.repository=ghcr.io/owner/sealos-storage-manager-backend \
   --set backend.image.tag=dev \
   --set web.image.repository=ghcr.io/owner/sealos-storage-manager-web \
   --set web.image.tag=dev
 ```
 
-Override `backend.config.viewerYaml` with a deployment-specific `viewer.yaml`
-value before exposing the service. The committed values contain example tokens
-and hostnames.
+Set `global.cloudDomain` from the cluster public domain. In Sealos-managed
+installs this is the same value exposed as `cloudDomain` in
+`sealos-system/sealos-config`. Optional `global.cloudPort`, `global.httpPort`,
+and `global.disableHttps` values control generated public URLs.
+
+The chart derives:
+
+- File Browser auth callback URL:
+  `https://<web host>/internal/filebrowser-hook/verify`
+- File Browser viewer host template:
+  `<hostPrefix>-{{ .PodSessionID }}.<cloudDomain>`
+
+Override `backend.config.viewer.hookClientToken` before exposing the service.
+The committed value is a placeholder token.
 
 Expose `viewer-web` as the public entrypoint. The chart renders nginx config
 that serves the SPA, rewrites public `/api/*` requests to the backend's
