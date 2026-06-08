@@ -44,7 +44,8 @@ Optional tools used by the full plan:
 ```sh
 make lint
 make security
-make build-image IMAGE=registry.example.com/viewer-backend:dev
+make build-images TAG=dev
+make deploy-verify
 ```
 
 `make test-integration` uses a real Kubernetes cluster and reads
@@ -178,36 +179,59 @@ configuration.
 
 ## Self-hosted Build
 
-```sh
-make build-image IMAGE=sealos-storage-manager-viewer:dev
-```
-
-The frontend is a separate Vite build. Build `web/`, copy `web/dist` into an
-nginx-compatible static image, and use `sealos-storage-manager-web:dev` or your
-registry image name in the frontend deployment manifest.
-
-Deploy the backend image with the existing backend manifests in `deploy/`,
-mounting a real `viewer.yaml` through a ConfigMap or Secret. Deploy the
-frontend with:
+Build both deployable images:
 
 ```sh
-kubectl apply -f deploy/namespace.yaml
-kubectl apply -f deploy/configmap.yaml
-kubectl apply -f deploy/service-account.yaml
-kubectl apply -f deploy/storageclass-admin.yaml
-kubectl apply -f deploy/deployment.yaml
-kubectl apply -f deploy/service.yaml
-kubectl apply -f deploy/web-configmap.yaml
-kubectl apply -f deploy/web-deployment.yaml
-kubectl apply -f deploy/web-service.yaml
+make build-images TAG=dev
 ```
 
-Expose `viewer-web` as the public entrypoint. The committed frontend nginx
-config serves the SPA, rewrites public `/api/*` requests to the backend's
+This creates:
+
+- `sealos-storage-manager-backend:dev`
+- `sealos-storage-manager-web:dev`
+
+Push both images to a registry:
+
+```sh
+make push-images REGISTRY=ghcr.io IMAGE_PREFIX=owner/sealos-storage-manager TAG=dev
+```
+
+The legacy backend-only image target remains available when needed:
+
+```sh
+make build-image IMAGE=registry.example.com/viewer-backend:dev
+```
+
+## Helm Deployment
+
+`deploy/` is the Helm chart for self-hosted deployment. Validate it before
+shipping changes:
+
+```sh
+make deploy-verify
+```
+
+Install or upgrade the chart:
+
+```sh
+helm upgrade --install sealos-storage-manager deploy \
+  --namespace sealos-storage-manager \
+  --create-namespace \
+  --set backend.image.repository=ghcr.io/owner/sealos-storage-manager-backend \
+  --set backend.image.tag=dev \
+  --set web.image.repository=ghcr.io/owner/sealos-storage-manager-web \
+  --set web.image.tag=dev
+```
+
+Override `backend.config.viewerYaml` with a deployment-specific `viewer.yaml`
+value before exposing the service. The committed values contain example tokens
+and hostnames.
+
+Expose `viewer-web` as the public entrypoint. The chart renders nginx config
+that serves the SPA, rewrites public `/api/*` requests to the backend's
 unprefixed routes, and proxies `/metrics` plus
 `/internal/filebrowser-hook/verify` to the internal `viewer-backend` service.
 
-Override frontend runtime settings by replacing the `runtime-config.js` value in
-`deploy/web-configmap.yaml` or by mounting your own file at the same path. The
+Override frontend runtime settings through `web.runtimeConfig` values. The
 default `apiBaseUrl` is `/api`, which keeps browser API requests on the same
 origin as the web app and lets the frontend service own the public rewrite.
