@@ -3,14 +3,20 @@ GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
 ENCORE ?= encore
 PNPM ?= pnpm
+HELM ?= helm
 CONFIG ?= config/viewer.debug.yaml
 INTEGRATION_CONFIG ?= config/viewer.integration.yaml
 IMAGE ?= sealos-storage-manager-viewer:dev
+REGISTRY ?=
+IMAGE_PREFIX ?= sealos-storage-manager
+TAG ?= dev
+TAGS ?= $(TAG)
+PLATFORMS ?= linux/amd64
 WEB_DIR ?= web
 WEB_DEV_API_BASE_URL ?= http://localhost:4000
 WEB_DEV_KUBECONFIG ?= ../config/kubeconfig.dev.yaml
 
-.PHONY: dev backend-dev web-dev fmt backend-fmt web-fmt fmt-check backend-fmt-check web-fmt-check lint backend-lint web-lint vet backend-vet test backend-test web-test test-race backend-test-race test-integration backend-test-integration security backend-security build-image backend-build-image verify backend-verify web-verify tidy backend-tidy web-install web-generate-api web-typecheck build web-build web-check-css e2e web-e2e
+.PHONY: dev backend-dev web-dev fmt backend-fmt web-fmt fmt-check backend-fmt-check web-fmt-check lint backend-lint web-lint vet backend-vet test backend-test web-test test-race backend-test-race test-integration backend-test-integration security backend-security build-image backend-build-image build-images push-images web-build-image chart-lint chart-template chart-package deploy-verify verify backend-verify web-verify tidy backend-tidy web-install web-generate-api web-typecheck build web-build web-check-css e2e web-e2e
 
 dev:
 	$(MAKE) -j2 backend-dev web-dev
@@ -77,6 +83,27 @@ build-image: backend-build-image
 
 backend-build-image:
 	$(ENCORE) build docker --config=infra-config.json $(IMAGE)
+
+build-images:
+	REGISTRY="$(REGISTRY)" IMAGE_PREFIX="$(IMAGE_PREFIX)" TAGS="$(TAGS)" PLATFORMS="$(PLATFORMS)" PUSH=false ./scripts/build-images.sh
+
+push-images:
+	REGISTRY="$(REGISTRY)" IMAGE_PREFIX="$(IMAGE_PREFIX)" TAGS="$(TAGS)" PLATFORMS="$(PLATFORMS)" PUSH=true ./scripts/build-images.sh
+
+web-build-image:
+	docker buildx build --platform $(PLATFORMS) -f $(WEB_DIR)/Dockerfile -t $(IMAGE_PREFIX)-web:$(TAG) --load $(WEB_DIR)
+
+chart-lint:
+	$(HELM) lint deploy
+
+chart-template:
+	$(HELM) template sealos-storage-manager deploy --namespace sealos-storage-manager >/dev/null
+
+chart-package:
+	mkdir -p dist/charts
+	$(HELM) package deploy --destination dist/charts
+
+deploy-verify: chart-lint chart-template chart-package
 
 tidy: backend-tidy
 
