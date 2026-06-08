@@ -364,6 +364,28 @@ func TestEnsurePodSessionSkipsTerminatingViewerPod(t *testing.T) {
 	}
 }
 
+func TestViewerURLUsesConfiguredPublicScheme(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	cfg.Viewer.Ingress.PublicScheme = "https"
+	cfg.Viewer.Ingress.TLSSecretName = ""
+	service := NewPodService(
+		cfg,
+		state.New(cfg.Cache),
+		kube.New(fake.NewSimpleClientset()),
+		observability.MustNew(cfg.Observability, nil),
+	)
+
+	viewerURL, err := service.viewerURL("ps_demo")
+	if err != nil {
+		t.Fatalf("viewerURL() error = %v", err)
+	}
+	if viewerURL != "https://viewer-ps-demo.example.test" {
+		t.Fatalf("viewerURL() = %q, want https public URL", viewerURL)
+	}
+}
+
 func testConfig() config.Config {
 	cfg := config.Default()
 	cfg.Viewer.HookClientToken = "hook-token"

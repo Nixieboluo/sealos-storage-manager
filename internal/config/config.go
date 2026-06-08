@@ -69,6 +69,7 @@ type ServiceConfig struct {
 type IngressConfig struct {
 	ClassName     string `yaml:"class_name"`
 	HostTemplate  string `yaml:"host_template"`
+	PublicScheme  string `yaml:"public_scheme"`
 	TLSSecretName string `yaml:"tls_secret_name"`
 }
 
@@ -260,6 +261,11 @@ func (cfg Config) Validate() error {
 	}
 	if strings.TrimSpace(cfg.Viewer.Ingress.HostTemplate) == "" {
 		problems = append(problems, "viewer.ingress.host_template is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Viewer.Ingress.PublicScheme)) {
+	case "", "http", "https":
+	default:
+		problems = append(problems, "viewer.ingress.public_scheme must be one of http, https")
 	}
 	if cfg.Sessions.ViewerSessionTimout <= 0 {
 		problems = append(problems, "sessions.viewer_session_timeout must be positive")

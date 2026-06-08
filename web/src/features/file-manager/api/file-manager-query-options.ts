@@ -43,6 +43,7 @@ export function fileUsageQueryOptions(session: FileBrowserSession | null, enable
 			return session.client.usage('/', signal)
 		},
 		enabled: session !== null && enabled,
+		retry: false,
 		staleTime: 5_000,
 	})
 }

@@ -1,4 +1,5 @@
 import type { FileBrowserResource } from '@sealos-storage-manager/filebrowser-client'
+import type { QueryClient } from '@tanstack/react-query'
 import type { ComponentProps } from 'react'
 import type { FileBrowserSession } from '@/features/file-manager/types/file-manager'
 
@@ -67,6 +68,7 @@ export interface RenderFileManagerOptions {
 	onPathChange?: (path: string) => void
 	onRefreshSession?: () => void
 	podSessionID?: string | null
+	queryClient?: QueryClient
 	sessionCapability?: ComponentProps<typeof FileManagerView>['sessionCapability']
 	viewerSession?: ComponentProps<typeof FileManagerView>['viewerSession']
 	viewerSessionID?: string | null
@@ -110,6 +112,7 @@ export function renderFileManager(
 			viewerSession={options.viewerSession}
 			viewerSessionID={options.viewerSessionID}
 		/>,
+		{ queryClient: options.queryClient },
 	)
 }
 

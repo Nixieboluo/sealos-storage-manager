@@ -86,6 +86,7 @@ viewer:
   ingress:
     class_name: nginx
     host_template: viewer-{{ .PodSessionID }}.example.com
+    public_scheme: https
     tls_secret_name: ""
 
 admin:

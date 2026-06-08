@@ -25,11 +25,19 @@ func (s *PodService) viewerURL(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	scheme := "https"
-	if s.cfg.Viewer.Ingress.TLSSecretName == "" {
-		scheme = "http"
-	}
+	scheme := s.viewerPublicScheme()
 	return scheme + "://" + host, nil
+}
+
+func (s *PodService) viewerPublicScheme() string {
+	scheme := strings.ToLower(strings.TrimSpace(s.cfg.Viewer.Ingress.PublicScheme))
+	if scheme != "" {
+		return scheme
+	}
+	if s.cfg.Viewer.Ingress.TLSSecretName == "" {
+		return "http"
+	}
+	return "https"
 }
 
 func (s *PodService) internalViewerURL(namespace string, serviceName string) string {

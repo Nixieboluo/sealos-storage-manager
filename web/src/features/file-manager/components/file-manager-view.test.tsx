@@ -1,5 +1,6 @@
 import type { FileBrowserResource } from '@sealos-storage-manager/filebrowser-client'
 
+import { QueryClient } from '@tanstack/react-query'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -181,18 +182,27 @@ describe('fileManagerView', () => {
 	})
 
 	it('keeps files usable when mounted storage usage cannot be read', async () => {
+		const usage = vi.fn().mockRejectedValue(new Error('usage failed'))
+		const queryClient = new QueryClient({
+			defaultOptions: {
+				queries: {
+					retry: 3,
+				},
+			},
+		})
 		const session = sessionWithClient({
 			list: vi.fn(async () => resource('/', '', true, [
 				resource('/readme.md', 'readme.md', false),
 			])),
-			usage: vi.fn().mockRejectedValue(new Error('usage failed')),
+			usage,
 		})
 
-		renderFileManager(session)
+		renderFileManager(session, { queryClient })
 
 		expect(await screen.findByText('readme.md')).toBeInTheDocument()
 		expect(await screen.findByText(/capacity unavailable/i)).toBeInTheDocument()
 		expect(screen.getByRole('table')).toBeInTheDocument()
+		expect(usage).toHaveBeenCalledTimes(1)
 	})
 
 	it('refreshes mounted storage usage with the file list', async () => {

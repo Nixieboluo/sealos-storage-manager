@@ -78,6 +78,7 @@ viewer:
   ingress:
     class_name: nginx
     host_template: viewer-{{ .PodSessionID }}.example.test
+    public_scheme: https
 observability:
   logs:
     level: debug
@@ -128,6 +129,9 @@ admin:
 	}
 	if cfg.Observability.Traces.Exporter != "otlp" {
 		t.Fatalf("trace exporter = %q", cfg.Observability.Traces.Exporter)
+	}
+	if cfg.Viewer.Ingress.PublicScheme != "https" {
+		t.Fatalf("public scheme = %q", cfg.Viewer.Ingress.PublicScheme)
 	}
 	if cfg.Observability.Traces.Endpoint != "http://otel-collector:4318/v1/traces" {
 		t.Fatalf("trace endpoint = %q", cfg.Observability.Traces.Endpoint)
@@ -186,6 +190,16 @@ func TestLoadRejectsInvalidConfig(t *testing.T) {
 			name: "database inside pvc mount",
 			body: replaceConfig(t, validConfigYAML, "    database_path: /tmp/filebrowser.db\n", "    database_path: /srv/filebrowser.db\n"),
 			want: "database_path must not be inside",
+		},
+		{
+			name: "bad viewer public scheme",
+			body: replaceConfig(
+				t,
+				validConfigYAML,
+				"    host_template: viewer-{{ .PodSessionID }}.example.test\n",
+				"    host_template: viewer-{{ .PodSessionID }}.example.test\n    public_scheme: ftp\n",
+			),
+			want: "viewer.ingress.public_scheme",
 		},
 		{
 			name: "bad log exporter",
