@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { readDevEnableAdminMode } from '@/config/env'
 import { FileManagerView } from '@/features/file-manager/components/file-manager-view'
 import { RecycleBinView } from '@/features/file-manager/components/recycle-bin-view'
 import { trashRootPath } from '@/features/file-manager/utils/file-tree'
@@ -106,8 +107,11 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const contextQuery = useQuery(viewerContextQueryOptions(api))
 	const adminCapabilitiesQuery = useQuery(adminCapabilitiesQueryOptions(api))
 	const effectiveNamespace = namespace || contextQuery.data?.namespace || ''
-	const sealosUserNamespace = resolveSealosUserNamespace(getCachedSealosAuthorization()?.session ?? null)
-	const adminContextMatchesUser = Boolean(contextQuery.data?.namespace && sealosUserNamespace === contextQuery.data.namespace)
+	const authorization = getCachedSealosAuthorization()
+	const sealosUserNamespace = resolveSealosUserNamespace(authorization?.session ?? null)
+	const adminContextMatchesUser = readDevEnableAdminMode()
+		? Boolean(contextQuery.data?.namespace)
+		: Boolean(contextQuery.data?.namespace && sealosUserNamespace === contextQuery.data.namespace)
 	const canManagePVCs = (adminCapabilitiesQuery.data?.can_manage_pvcs ?? false) && adminContextMatchesUser
 	const canManageStorageClasses = (adminCapabilitiesQuery.data?.can_manage_storage_classes ?? false) && adminContextMatchesUser
 	const fileManagementEnabled = adminCapabilitiesQuery.data?.file_management_enabled ?? true

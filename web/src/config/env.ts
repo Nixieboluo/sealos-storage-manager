@@ -3,10 +3,12 @@ const apiBaseUrl = import.meta.env.DEV
 	? import.meta.env.VITE_API_BASE_URL ?? runtimeConfig?.apiBaseUrl ?? '/api'
 	: runtimeConfig?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? '/api'
 const forcedLanguage = readForcedLanguage()
+const devEnableAdminMode = readDevEnableAdminMode()
 const disableSealosDesktopSDK = readDisableSealosDesktopSDK()
 
 export const env = {
 	apiBaseUrl,
+	devEnableAdminMode,
 	disableSealosDesktopSDK,
 	forcedLanguage,
 	fileUploadTusChunkBytes: parsePositiveInteger(
@@ -44,6 +46,10 @@ export function readForcedLanguage() {
 
 export function readDisableSealosDesktopSDK() {
 	return import.meta.env.DEV && parseBoolean(import.meta.env.VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK)
+}
+
+export function readDevEnableAdminMode() {
+	return import.meta.env.DEV && parseBoolean(import.meta.env.VITE_DEV_ENABLE_ADMIN_MODE)
 }
 
 function parseForcedLanguage(value: string | undefined) {

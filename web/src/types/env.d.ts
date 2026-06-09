@@ -1,5 +1,6 @@
 interface ImportMetaEnv {
 	readonly VITE_API_BASE_URL?: string
+	readonly VITE_DEV_ENABLE_ADMIN_MODE?: string
 	readonly VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK?: string
 	readonly VITE_DEV_KUBECONFIG?: string
 }

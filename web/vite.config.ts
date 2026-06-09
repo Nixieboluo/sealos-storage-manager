@@ -12,10 +12,12 @@ import { assertNoDevOnlyEnvInBuild } from './vite/env-guard'
 export default defineConfig(({ command, mode }) => {
 	const viteEnv = loadEnv(mode, process.cwd(), 'VITE_')
 	const apiBaseUrl = process.env.VITE_API_BASE_URL ?? viteEnv.VITE_API_BASE_URL
+	const devEnableAdminMode = process.env.VITE_DEV_ENABLE_ADMIN_MODE ?? viteEnv.VITE_DEV_ENABLE_ADMIN_MODE
 	const devDisableSealosDesktopSDK = process.env.VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK ?? viteEnv.VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK
 	const devKubeconfig = process.env.VITE_DEV_KUBECONFIG ?? viteEnv.VITE_DEV_KUBECONFIG
 	assertNoDevOnlyEnvInBuild(command, {
 		apiBaseUrl,
+		devEnableAdminMode,
 		devDisableSealosDesktopSDK,
 		devKubeconfig,
 	})

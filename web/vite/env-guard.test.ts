@@ -27,9 +27,18 @@ describe('vite environment guard', () => {
 		)
 	})
 
+	it('rejects production builds with the development admin mode env var', () => {
+		expect(() => assertNoDevOnlyEnvInBuild('build', {
+			devEnableAdminMode: 'true',
+		})).toThrow(
+			'VITE_DEV_ENABLE_ADMIN_MODE is development-only',
+		)
+	})
+
 	it('allows local dev with the development kubeconfig env var', () => {
 		expect(() => assertNoDevOnlyEnvInBuild('serve', {
 			apiBaseUrl: 'http://localhost:4000',
+			devEnableAdminMode: 'true',
 			devKubeconfig: 'apiVersion: v1',
 			devDisableSealosDesktopSDK: 'true',
 		})).not.toThrow()

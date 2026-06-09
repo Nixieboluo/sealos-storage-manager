@@ -39,6 +39,7 @@ describe('frontend environment parsing', () => {
 	it('uses Vite API base URL before runtime config in dev mode', async () => {
 		vi.stubEnv('DEV', true)
 		vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:4000')
+		vi.stubEnv('VITE_DEV_ENABLE_ADMIN_MODE', 'true')
 		vi.stubEnv('VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK', 'true')
 		window.__SEALOS_STORAGE_MANAGER_CONFIG__ = {
 			apiBaseUrl: '/api',
@@ -48,15 +49,18 @@ describe('frontend environment parsing', () => {
 		const { env } = await import('@/config/env')
 
 		expect(env.apiBaseUrl).toBe('http://localhost:4000')
+		expect(env.devEnableAdminMode).toBe(true)
 		expect(env.disableSealosDesktopSDK).toBe(true)
 	})
 
-	it('ignores the Desktop SDK bypass env var outside dev mode', async () => {
+	it('ignores development-only frontend flags outside dev mode', async () => {
 		vi.stubEnv('DEV', false)
+		vi.stubEnv('VITE_DEV_ENABLE_ADMIN_MODE', 'true')
 		vi.stubEnv('VITE_DEV_DISABLE_SEALOS_DESKTOP_SDK', 'true')
 
 		const { env } = await import('@/config/env')
 
+		expect(env.devEnableAdminMode).toBe(false)
 		expect(env.disableSealosDesktopSDK).toBe(false)
 	})
 

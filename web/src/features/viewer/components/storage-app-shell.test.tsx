@@ -1,3 +1,6 @@
+import type { SessionV1 } from '@labring/sealos-desktop-sdk'
+import type { SealosAuthorizationState } from '@/services/sealos/sealos-authorization'
+
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +18,24 @@ import {
 	viewerTokenFixture,
 } from '@/features/viewer/test/fakes'
 import { renderWithProviders } from '@/test/render'
+
+const sealosAuthorizationMockState = vi.hoisted(() => ({
+	authorization: {
+		authorizationHeader: 'Bearer test',
+		session: {
+			kubeconfig: 'apiVersion: v1\nclusters: []',
+			subscription: {} as SessionV1['subscription'],
+			user: {
+				avatar: '',
+				id: 'user-1',
+				k8sUsername: 'ns-admin',
+				name: 'Admin',
+				nsid: 'admin',
+			},
+		},
+		source: 'sdk',
+	} as SealosAuthorizationState,
+}))
 
 vi.mock('@monaco-editor/react', () => ({
 	default: ({
@@ -34,21 +55,28 @@ vi.mock('@monaco-editor/react', () => ({
 
 vi.mock('@/services/sealos/sealos-authorization', async importOriginal => ({
 	...(await importOriginal<typeof import('@/services/sealos/sealos-authorization')>()),
-	getCachedSealosAuthorization: vi.fn(() => ({
-		authorizationHeader: 'Bearer test',
-		session: {
-			user: {
-				k8sUsername: 'ns-admin',
-				nsid: 'admin',
-			},
-		},
-		source: 'sdk',
-	})),
+	getCachedSealosAuthorization: vi.fn(() => sealosAuthorizationMockState.authorization),
 }))
 
 describe('storageAppShell', () => {
 	beforeEach(() => {
 		viewerUIStore.actions.reset()
+		vi.unstubAllEnvs()
+		sealosAuthorizationMockState.authorization = {
+			authorizationHeader: 'Bearer test',
+			session: {
+				kubeconfig: 'apiVersion: v1\nclusters: []',
+				subscription: {} as SessionV1['subscription'],
+				user: {
+					avatar: '',
+					id: 'user-1',
+					k8sUsername: 'ns-admin',
+					name: 'Admin',
+					nsid: 'admin',
+				},
+			},
+			source: 'sdk',
+		}
 	})
 
 	it('renders PVCs, launches File Browser, and shows real file manager state', async () => {
@@ -204,6 +232,39 @@ describe('storageAppShell', () => {
 			namespace: 'kube-system',
 			pvcName: 'system-data',
 		}))
+	})
+
+	it('shows admin controls for dev kubeconfig when dev admin mode is enabled', async () => {
+		vi.stubEnv('DEV', true)
+		vi.stubEnv('VITE_DEV_ENABLE_ADMIN_MODE', 'true')
+		sealosAuthorizationMockState.authorization = {
+			authorizationHeader: 'Bearer dev',
+			session: null,
+			source: 'dev-kubeconfig',
+		}
+		const adminListNamespaces = vi.fn().mockResolvedValue([
+			{ is_current_context: true, name: 'ns-admin' },
+			{ is_current_context: false, name: 'kube-system' },
+		])
+		const api = createFakeViewerAPI({
+			adminCapabilities: vi.fn().mockResolvedValue({
+				can_manage_pvcs: true,
+				can_manage_storage_classes: true,
+				file_management_enabled: true,
+			}),
+			adminListNamespaces,
+			getContext: vi.fn().mockResolvedValue({
+				context_name: 'dev',
+				namespace: 'ns-admin',
+			}),
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		expect(await screen.findByRole('combobox', { name: /system namespace/i })).toBeInTheDocument()
+		expect(screen.getByRole('button', { name: 'StorageClasses' })).toBeInTheDocument()
+		expect(adminListNamespaces).toHaveBeenCalled()
 	})
 
 	it('hides admin features when backend context is outside the Sealos user namespace', async () => {
