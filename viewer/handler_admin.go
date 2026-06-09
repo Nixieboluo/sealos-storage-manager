@@ -23,18 +23,19 @@ func (h *Handler) adminCapabilities(
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
 	adminResult, adminErr := h.checkAdmin(ctx, principal)
-	canManage := adminErr == nil && adminResult.Allowed
+	namespaceAllowed := adminErr == nil && isAdminInOwnNamespace(principal, adminResult)
+	canManage := adminErr == nil && adminResult.Allowed && namespaceAllowed
 	h.recordAudit(ctx, auditDecision{
 		adminAllowed:       canManage,
 		authorizationKind:  "kubeconfig",
 		decision:           allowDeny(canManage),
-		denyReason:         denyReason(adminErr, adminResult.Reason),
+		denyReason:         adminCapabilityDenyReason(adminErr, adminResult.Reason, namespaceAllowed),
 		executionKind:      "management_service_account",
 		identityMethod:     "kubeconfig_context+self_subject_review",
 		kubernetesUsername: adminResult.KubernetesUsername,
 		mode:               operationModeAdmin,
 		namespace:          principal.Namespace,
-		namespaceAllowed:   true,
+		namespaceAllowed:   namespaceAllowed,
 		principal:          principal,
 		route:              "/admin/capabilities",
 	})
@@ -60,18 +61,19 @@ func (h *Handler) adminListNamespaces(
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
 	adminResult, adminErr := h.checkAdmin(ctx, principal)
-	if adminErr != nil {
+	namespaceAllowed := adminErr == nil && isAdminInOwnNamespace(principal, adminResult)
+	if adminErr != nil || !namespaceAllowed {
 		h.recordAudit(ctx, auditDecision{
-			adminAllowed:       false,
+			adminAllowed:       adminErr == nil && adminResult.Allowed,
 			authorizationKind:  "kubeconfig",
 			decision:           "deny",
-			denyReason:         denyReason(adminErr, adminResult.Reason),
+			denyReason:         adminCapabilityDenyReason(adminErr, adminResult.Reason, namespaceAllowed),
 			executionKind:      "management_service_account",
 			identityMethod:     "kubeconfig_context+self_subject_review",
 			kubernetesUsername: adminResult.KubernetesUsername,
 			mode:               operationModeAdmin,
 			namespace:          principal.Namespace,
-			namespaceAllowed:   false,
+			namespaceAllowed:   namespaceAllowed,
 			principal:          principal,
 			route:              "/admin/namespaces",
 		})
@@ -95,7 +97,7 @@ func (h *Handler) adminListNamespaces(
 		kubernetesUsername: adminResult.KubernetesUsername,
 		mode:               operationModeAdmin,
 		namespace:          principal.Namespace,
-		namespaceAllowed:   true,
+		namespaceAllowed:   namespaceAllowed,
 		principal:          principal,
 		route:              "/admin/namespaces",
 	})
@@ -261,16 +263,17 @@ func (h *Handler) authorizeStorageClassAdmin(
 	}
 	ctx = authn.WithPrincipal(ctx, principal)
 	adminResult, adminErr := h.checkAdmin(ctx, principal)
-	if adminErr != nil {
+	namespaceAllowed := adminErr == nil && isAdminInOwnNamespace(principal, adminResult)
+	if adminErr != nil || !namespaceAllowed {
 		h.recordAudit(ctx, auditDecision{
-			adminAllowed:       false,
+			adminAllowed:       adminErr == nil && adminResult.Allowed,
 			decision:           "deny",
-			denyReason:         denyReason(adminErr, adminResult.Reason),
+			denyReason:         adminCapabilityDenyReason(adminErr, adminResult.Reason, namespaceAllowed),
 			identityMethod:     "kubeconfig_context+self_subject_review",
 			kubernetesUsername: adminResult.KubernetesUsername,
 			mode:               operationModeAdmin,
 			namespace:          principal.Namespace,
-			namespaceAllowed:   true,
+			namespaceAllowed:   namespaceAllowed,
 			principal:          principal,
 			route:              "/admin/storage-classes",
 		})
@@ -283,9 +286,19 @@ func (h *Handler) authorizeStorageClassAdmin(
 		kubernetesUsername: adminResult.KubernetesUsername,
 		mode:               operationModeAdmin,
 		namespace:          principal.Namespace,
-		namespaceAllowed:   true,
+		namespaceAllowed:   namespaceAllowed,
 		principal:          principal,
 		route:              "/admin/storage-classes",
 	})
 	return nil
+}
+
+func adminCapabilityDenyReason(adminErr error, adminReason string, namespaceAllowed bool) string {
+	if adminErr != nil {
+		return denyReason(adminErr, adminReason)
+	}
+	if !namespaceAllowed {
+		return "namespace_not_allowed"
+	}
+	return ""
 }

@@ -68,6 +68,66 @@ contexts:
     namespace: ns
 `
 
+const testUserNamespaceKubeconfig = `apiVersion: v1
+kind: Config
+current-context: dev
+clusters:
+- name: c
+  cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+users:
+- name: u
+  user:
+    token: test-token
+contexts:
+- name: dev
+  context:
+    cluster: c
+    user: u
+    namespace: ns-admin
+`
+
+const testOtherUserNamespaceKubeconfig = `apiVersion: v1
+kind: Config
+current-context: dev
+clusters:
+- name: c
+  cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+users:
+- name: u
+  user:
+    token: test-token
+contexts:
+- name: dev
+  context:
+    cluster: c
+    user: u
+    namespace: ns-rm68q0bp
+`
+
+const testSystemNamespaceKubeconfig = `apiVersion: v1
+kind: Config
+current-context: dev
+clusters:
+- name: c
+  cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+users:
+- name: u
+  user:
+    token: test-token
+contexts:
+- name: dev
+  context:
+    cluster: c
+    user: u
+    namespace: kube-system
+`
+
 func (f *fakeViewerService) ListPVCs(_ context.Context, namespace string) ([]domain.PVC, error) {
 	if len(f.pvcs) > 0 {
 		for i := range f.pvcs {
@@ -263,6 +323,7 @@ type allowAdminAuthorizer struct{}
 func (allowAdminAuthorizer) CanAdmin(_ context.Context, _ *authn.Principal) (AdminAuthorizationResult, error) {
 	return AdminAuthorizationResult{
 		Allowed:            true,
+		AllowedNamespace:   "ns-admin",
 		KubernetesUsername: "system:serviceaccount:user-system:admin",
 		Reason:             "allowed",
 	}, nil

@@ -571,6 +571,7 @@ func TestDeployStorageClassAdminManifest(t *testing.T) {
 		}
 		if document.Kind == "ClusterRole" && document.Metadata.Name == "storage-manager-storageclass-admin" {
 			requireRule(t, document.Rules, "storage.k8s.io", "storageclasses", []string{"get", "list", "create", "update", "delete"})
+			requireRule(t, document.Rules, "", "persistentvolumeclaims", []string{"list"})
 			foundStorageRole = true
 		}
 		if document.Kind == "Role" && document.Metadata.Name == "viewer-backend-impersonate-storageclass-admin" {

@@ -202,7 +202,7 @@ func TestHandlerAdminSessionFollowUpAPIsUseExistingSessionEndpoints(t *testing.T
 	tokenCall := viewerSessionCall{}
 	heartbeatCall := viewerSessionCall{}
 	closeCall := viewerSessionCall{}
-	principal, err := authn.PrincipalFromAuthorization(url.QueryEscape(testKubeconfig))
+	principal, err := authn.PrincipalFromAuthorization(url.QueryEscape(testUserNamespaceKubeconfig))
 	if err != nil {
 		t.Fatalf("PrincipalFromAuthorization() error = %v", err)
 	}
@@ -291,7 +291,7 @@ func TestHandlerAdminSessionFollowUpAPIsUseExistingSessionEndpoints(t *testing.T
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+			tt.req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 			recorder := httptest.NewRecorder()
 
 			tt.handle(handler, recorder, tt.req)
@@ -352,6 +352,62 @@ func TestHandlerAdminSessionFollowUpDeniedWhenAdminAccessRevoked(t *testing.T) {
 	}
 	if tokenCall != (viewerSessionCall{}) {
 		t.Fatalf("token issued after admin denial: %#v", tokenCall)
+	}
+}
+
+func TestHandlerAdminSessionFollowUpRequiresOwnNamespaceContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{name: "system namespace", kubeconfig: testSystemNamespaceKubeconfig},
+		{name: "other user namespace", kubeconfig: testOtherUserNamespaceKubeconfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var tokenCall viewerSessionCall
+			handler := NewHandler(
+				&fakeViewerService{
+					namespaces: []corev1.Namespace{
+						{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}},
+					},
+					created: &domain.ViewerSession{
+						ID:           "vs_1",
+						PodSessionID: "ps_1",
+						Namespace:    "kube-system",
+						PVCName:      "data",
+						AdminContext: true,
+					},
+					tokenInput: &tokenCall,
+					token:      &domain.ViewerToken{ViewerSessionID: "vs_1", Token: "fb-token"},
+				},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+				WithAdminAuthorizer(allowAdminAuthorizer{}),
+			)
+			req := httptest.NewRequest(http.MethodPost, "/viewer-sessions/vs_1/token", nil)
+			req.Header.Set("Authorization", url.QueryEscape(tt.kubeconfig))
+			recorder := httptest.NewRecorder()
+
+			handler.IssueToken(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+			if tokenCall != (viewerSessionCall{}) {
+				t.Fatalf("token issued after namespace denial: %#v", tokenCall)
+			}
+		})
 	}
 }
 

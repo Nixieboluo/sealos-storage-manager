@@ -28,7 +28,7 @@ func TestHandlerAdminCapabilitiesReturnsFalseForNonAdmin(t *testing.T) {
 		WithAdminAuthorizer(denyTestAdminAuthorizer{}),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/admin/capabilities", nil)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.AdminCapabilities(recorder, req)
@@ -58,7 +58,7 @@ func TestHandlerAdminCapabilitiesReportsFileManagementDisabled(t *testing.T) {
 		WithFeatureConfig(testDisabledFileManagement()),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/admin/capabilities", nil)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.AdminCapabilities(recorder, req)
@@ -71,6 +71,48 @@ func TestHandlerAdminCapabilitiesReportsFileManagementDisabled(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"file_management_enabled":false`) {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerAdminCapabilitiesRequireOwnNamespaceContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{name: "system namespace", kubeconfig: testSystemNamespaceKubeconfig},
+		{name: "other user namespace", kubeconfig: testOtherUserNamespaceKubeconfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := NewHandler(
+				&fakeViewerService{},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+				WithAdminAuthorizer(allowAdminAuthorizer{}),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/admin/capabilities", nil)
+			req.Header.Set("Authorization", url.QueryEscape(tt.kubeconfig))
+			recorder := httptest.NewRecorder()
+
+			handler.AdminCapabilities(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), `"can_manage_pvcs":false`) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), `"can_manage_storage_classes":false`) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+		})
 	}
 }
 
@@ -98,6 +140,46 @@ func TestHandlerAdminListStorageClassesRequiresAdmin(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerAdminListStorageClassesRequiresOwnNamespaceContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{name: "system namespace", kubeconfig: testSystemNamespaceKubeconfig},
+		{name: "other user namespace", kubeconfig: testOtherUserNamespaceKubeconfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := NewHandler(
+				&fakeViewerService{},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+				WithAdminAuthorizer(allowAdminAuthorizer{}),
+				WithStorageClassService(fakeStorageClassService{}),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/admin/storage-classes", nil)
+			req.Header.Set("Authorization", url.QueryEscape(tt.kubeconfig))
+			recorder := httptest.NewRecorder()
+
+			handler.AdminListStorageClasses(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+		})
 	}
 }
 
@@ -172,7 +254,7 @@ func TestHandlerAdminStorageClassEndpointsUseEnvelope(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			tt.req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+			tt.req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 			recorder := httptest.NewRecorder()
 
 			tt.handle(handler, recorder, tt.req)
@@ -206,7 +288,7 @@ func TestHandlerAdminListNamespacesFiltersUserNamespaces(t *testing.T) {
 		WithAdminAuthorizer(allowAdminAuthorizer{}),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/admin/namespaces", nil)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.AdminListNamespaces(recorder, req)
@@ -214,7 +296,7 @@ func TestHandlerAdminListNamespacesFiltersUserNamespaces(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), `"name":"ns","is_current_context":true`) {
+	if !strings.Contains(recorder.Body.String(), `"name":"ns-admin","is_current_context":true`) {
 		t.Fatalf("current namespace missing: %s", recorder.Body.String())
 	}
 	if !strings.Contains(recorder.Body.String(), `"name":"kube-system"`) {
@@ -248,6 +330,49 @@ func TestHandlerAdminListNamespacesRequiresAdmin(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerAdminListNamespacesRequiresOwnNamespaceContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{name: "system namespace", kubeconfig: testSystemNamespaceKubeconfig},
+		{name: "other user namespace", kubeconfig: testOtherUserNamespaceKubeconfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := NewHandler(
+				&fakeViewerService{
+					namespaces: []corev1.Namespace{
+						{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}},
+					},
+				},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+				WithAdminAuthorizer(allowAdminAuthorizer{}),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/admin/namespaces", nil)
+			req.Header.Set("Authorization", url.QueryEscape(tt.kubeconfig))
+			recorder := httptest.NewRecorder()
+
+			handler.AdminListNamespaces(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+		})
 	}
 }
 
@@ -312,7 +437,7 @@ func TestHandlerAdminImplicitPVCOperationsUseRequestedSystemNamespace(t *testing
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+			tt.req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 			recorder := httptest.NewRecorder()
 
 			tt.handle(handler, recorder, tt.req)
@@ -333,6 +458,49 @@ func TestHandlerAdminImplicitPVCOperationsUseRequestedSystemNamespace(t *testing
 	}
 }
 
+func TestHandlerAdminImplicitPVCRequiresOwnNamespaceContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{name: "system namespace", kubeconfig: testSystemNamespaceKubeconfig},
+		{name: "other user namespace", kubeconfig: testOtherUserNamespaceKubeconfig},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := NewHandler(
+				&fakeViewerService{
+					namespaces: []corev1.Namespace{
+						{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}},
+					},
+				},
+				fakePodService{},
+				fakeAuthService{},
+				nil,
+				observability.MustNew(testObservability(), nil),
+				allowAuthorizer{},
+				WithAdminAuthorizer(allowAdminAuthorizer{}),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/pvcs?namespace=kube-system", nil)
+			req.Header.Set("Authorization", url.QueryEscape(tt.kubeconfig))
+			recorder := httptest.NewRecorder()
+
+			handler.ListPVCs(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), string(apienv.CodeAdminAccessDenied)) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandlerAdminImplicitPVCRejectsUserNamespace(t *testing.T) {
 	t.Parallel()
 
@@ -350,7 +518,7 @@ func TestHandlerAdminImplicitPVCRejectsUserNamespace(t *testing.T) {
 		WithAdminAuthorizer(allowAdminAuthorizer{}),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/pvcs?namespace=ns-other-user", nil)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.ListPVCs(recorder, req)
@@ -393,7 +561,7 @@ func TestHandlerAdminViewerSessionMarksAdminContext(t *testing.T) {
 		"/viewer-sessions",
 		strings.NewReader(`{"namespace":"kube-system","pvc_name":"data"}`),
 	)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.CreateViewerSession(recorder, req)
@@ -433,7 +601,7 @@ func TestHandlerAdminUpdateStorageClassPolicyMapsRequest(t *testing.T) {
 		"/admin/storage-classes/standard/policy",
 		strings.NewReader(`{"visible_in_create":true,"allowed_access_modes":["ReadWriteOnce","ReadWriteMany"]}`),
 	)
-	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
 	recorder := httptest.NewRecorder()
 
 	handler.AdminUpdateStorageClassPolicy(recorder, req)

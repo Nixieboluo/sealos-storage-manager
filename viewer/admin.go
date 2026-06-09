@@ -26,6 +26,7 @@ type denyAdminAuthorizer struct{}
 
 type AdminAuthorizationResult struct {
 	Allowed            bool
+	AllowedNamespace   string
 	KubernetesUsername string
 	Reason             string
 }
@@ -84,6 +85,7 @@ func (a kubernetesAdminAuthorizer) CanAdmin(
 	for _, userID := range a.allowedUserIDs {
 		if username == sealosAdminUsername(userID) {
 			result.Allowed = true
+			result.AllowedNamespace = sealosUserNamespace(userID)
 			result.Reason = "allowed"
 			return result, nil
 		}
@@ -99,6 +101,10 @@ func (a kubernetesAdminAuthorizer) CanManageStorageClasses(ctx context.Context, 
 
 func sealosAdminUsername(userID string) string {
 	return "system:serviceaccount:" + sealosUserServiceAccountNamespace + ":" + strings.TrimSpace(userID)
+}
+
+func sealosUserNamespace(userID string) string {
+	return "ns-" + strings.TrimSpace(userID)
 }
 
 func allowedAdminUsernames(userIDs []string) []string {
