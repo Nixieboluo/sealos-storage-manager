@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
+	"github.com/nixieboluo/sealos-storage-manager/internal/session"
 )
 
 func TestHandlerListPVCsUsesEnvelope(t *testing.T) {
@@ -236,6 +238,45 @@ func TestHandlerCreatePVCUsesEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"pvc"`) {
 		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestHandlerCreatePVCRejectsWhenFeatureDisabled(t *testing.T) {
+	t.Parallel()
+
+	var input session.CreatePVCInput
+	cfg := config.Default()
+	cfg.Viewer.PVCCreation.Enabled = false
+	handler := NewHandler(
+		&fakeViewerService{
+			pvc:      &domain.PVC{Namespace: "ns", Name: "data", Capacity: "10Gi"},
+			pvcInput: &input,
+		},
+		fakePodService{},
+		fakeAuthService{},
+		nil,
+		observability.MustNew(testObservability(), nil),
+		allowAuthorizer{},
+		WithFeatureConfig(cfg.Features()),
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/pvcs",
+		strings.NewReader(`{"namespace":"ns","name":"data","capacity":"10Gi","access_modes":["ReadWriteOnce"]}`),
+	)
+	req.Header.Set("Authorization", url.QueryEscape(testKubeconfig))
+	recorder := httptest.NewRecorder()
+
+	handler.CreatePVC(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), string(apienv.CodePVCCreateForbidden)) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+	if input.Name != "" {
+		t.Fatalf("CreatePVC input = %#v", input)
 	}
 }
 

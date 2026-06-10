@@ -9,7 +9,6 @@ import (
 	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
 	"github.com/nixieboluo/sealos-storage-manager/internal/authn"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
-	"github.com/nixieboluo/sealos-storage-manager/internal/session"
 )
 
 func (h *Handler) adminCapabilities(
@@ -52,6 +51,7 @@ func (h *Handler) adminCapabilities(
 			CanManagePVCs:           canManage,
 			CanManageStorageClasses: canManage,
 			FileManagementEnabled:   h.features.FileManagement.Enabled,
+			PVCCreationEnabled:      h.features.PVCCreation.Enabled,
 			UserNamespace:           userNamespace,
 		},
 	}, nil
@@ -191,33 +191,6 @@ func (h *Handler) adminUpdateStorageClass(
 		return nil, apiErr
 	}
 	h.observe(ctx, http.MethodPut, "/admin/storage-classes/:name", http.StatusOK, start)
-	return &StorageClassResponse{StorageClass: item}, nil
-}
-
-func (h *Handler) adminUpdateStorageClassPolicy(
-	ctx context.Context,
-	name string,
-	req *StorageClassPolicyRequest,
-) (*StorageClassResponse, *apienv.Error) {
-	start := time.Now()
-	if apiErr := h.authorizeStorageClassAdmin(ctx, req); apiErr != nil {
-		h.observe(ctx, http.MethodPut, "/admin/storage-classes/:name/policy", apiErr.Status, start)
-		return nil, apiErr
-	}
-	item, updateErr := h.storageClasses.UpdateStorageClassPolicy(
-		ctx,
-		name,
-		session.StorageClassPolicyInput{
-			AllowedAccessModes: req.AllowedAccessModes,
-			VisibleInCreate:    req.VisibleInCreate,
-		},
-	)
-	if updateErr != nil {
-		apiErr := apienv.FromError(updateErr)
-		h.observe(ctx, http.MethodPut, "/admin/storage-classes/:name/policy", apiErr.Status, start)
-		return nil, apiErr
-	}
-	h.observe(ctx, http.MethodPut, "/admin/storage-classes/:name/policy", http.StatusOK, start)
 	return &StorageClassResponse{StorageClass: item}, nil
 }
 

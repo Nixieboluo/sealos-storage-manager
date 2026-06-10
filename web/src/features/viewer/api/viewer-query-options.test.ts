@@ -89,6 +89,7 @@ describe('viewer query options', () => {
 			can_manage_pvcs: false,
 			can_manage_storage_classes: false,
 			file_management_enabled: true,
+			pvc_creation_enabled: true,
 			user_namespace: 'ns-admin',
 		})
 		await expect(adminNamespaceListQueryOptions(api).queryFn?.({

@@ -37,11 +37,6 @@ type storageClassService interface {
 	GetStorageClassYAML(ctx context.Context, name string) (*session.StorageClassYAML, error)
 	CreateStorageClass(ctx context.Context, body string) (*domain.StorageClass, error)
 	UpdateStorageClass(ctx context.Context, name string, body string) (*domain.StorageClass, error)
-	UpdateStorageClassPolicy(
-		ctx context.Context,
-		name string,
-		input session.StorageClassPolicyInput,
-	) (*domain.StorageClass, error)
 	DeleteStorageClass(ctx context.Context, name string) (*domain.StorageClass, error)
 	DescribeStorageClass(ctx context.Context, name string) (*session.StorageClassDescribe, error)
 }

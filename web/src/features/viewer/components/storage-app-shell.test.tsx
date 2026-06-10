@@ -507,28 +507,23 @@ describe('storageAppShell', () => {
 		expect(await screen.findByText(detail)).toBeInTheDocument()
 	})
 
-	it('limits PVC access modes to the selected StorageClass policy', async () => {
+	it('creates PVCs with any StorageClass regardless of legacy policy metadata', async () => {
 		const user = userEvent.setup()
-		const createPVC = vi.fn().mockResolvedValue(pvcFixture({ name: 'shared-data' }))
+		const createPVC = vi.fn().mockResolvedValue(pvcFixture({ name: 'hidden-data' }))
 		const api = createFakeViewerAPI({
 			createPVC,
 			listPVCs: vi.fn().mockResolvedValue([]),
 			listStorageClasses: vi.fn().mockResolvedValue([
 				storageClassFixture({
 					name: 'standard',
-					allowed_access_modes: ['ReadWriteOnce'],
 				}),
 				storageClassFixture({
 					name: 'shared',
-					allowed_access_modes: ['ReadWriteMany'],
 					is_default: false,
 				}),
 				storageClassFixture({
 					name: 'hidden',
-					allowed_access_modes: ['ReadWriteMany'],
-					annotation_status: 'hidden',
 					is_default: false,
-					visible_in_create: false,
 				}),
 			]),
 		})
@@ -536,37 +531,26 @@ describe('storageAppShell', () => {
 		renderWithProviders(<StorageAppShell api={api} />)
 
 		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
-		await user.type(screen.getByLabelText('Name'), 'shared-data')
+		await user.type(screen.getByLabelText('Name'), 'hidden-data')
 		await user.click(screen.getByRole('combobox', { name: /storage class/i }))
-		await user.click(await screen.findByRole('option', { name: 'shared' }))
-		expect(screen.queryByRole('option', { name: 'hidden' })).not.toBeInTheDocument()
-		await waitFor(() => expect(screen.getByRole('combobox', { name: /access modes/i })).toHaveTextContent('ReadWriteMany'))
+		await user.click(await screen.findByRole('option', { name: 'hidden' }))
+		await user.click(screen.getByRole('combobox', { name: /access modes/i }))
+		await user.click(await screen.findByRole('option', { name: 'ReadWriteMany' }))
 		await user.click(screen.getByRole('button', { name: /^create$/i }))
 
 		await waitFor(() => expect(createPVC).toHaveBeenCalledWith(expect.objectContaining({
 			accessModes: ['ReadWriteMany'],
-			storageClassName: 'shared',
+			storageClassName: 'hidden',
 		})))
 	})
 
-	it('disables PVC creation when no StorageClass is visible for create', async () => {
+	it('disables PVC creation when no StorageClass exists', async () => {
 		const user = userEvent.setup()
 		const createPVC = vi.fn()
 		const api = createFakeViewerAPI({
 			createPVC,
 			listPVCs: vi.fn().mockResolvedValue([]),
-			listStorageClasses: vi.fn().mockResolvedValue([
-				storageClassFixture({
-					allowed_access_modes: [],
-					annotation_status: 'invalid',
-					visible_in_create: true,
-				}),
-				storageClassFixture({
-					name: 'hidden',
-					annotation_status: 'hidden',
-					visible_in_create: false,
-				}),
-			]),
+			listStorageClasses: vi.fn().mockResolvedValue([]),
 		})
 
 		renderWithProviders(<StorageAppShell api={api} />)
@@ -574,9 +558,26 @@ describe('storageAppShell', () => {
 		await user.click(await screen.findByRole('button', { name: /create pvc/i }))
 		await user.type(screen.getByLabelText('Name'), 'cache-data')
 
-		expect(screen.getByText(/no storageclass is available/i)).toBeInTheDocument()
+		expect(screen.getByText(/no storageclass exists/i)).toBeInTheDocument()
 		expect(screen.getByRole('button', { name: /^create$/i })).toBeDisabled()
 		expect(createPVC).not.toHaveBeenCalled()
+	})
+
+	it('hides PVC creation when the backend feature gate is disabled', async () => {
+		const api = createFakeViewerAPI({
+			adminCapabilities: vi.fn().mockResolvedValue({
+				can_manage_pvcs: false,
+				can_manage_storage_classes: false,
+				file_management_enabled: true,
+				pvc_creation_enabled: false,
+				user_namespace: 'ns-admin',
+			}),
+			listPVCs: vi.fn().mockResolvedValue([]),
+		})
+
+		renderWithProviders(<StorageAppShell api={api} />)
+
+		await waitFor(() => expect(screen.queryByRole('button', { name: /create pvc/i })).not.toBeInTheDocument())
 	})
 
 	it('orders the create PVC form as storage class before access mode', async () => {
@@ -649,10 +650,6 @@ describe('storageAppShell', () => {
 			name: 'standard',
 			yaml: 'apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: standard\nprovisioner: test.io/standard\n',
 		}))
-		const adminUpdateStorageClassPolicy = vi.fn().mockResolvedValue(storageClassFixture({
-			name: 'standard',
-			allowed_access_modes: ['ReadWriteMany'],
-		}))
 		const adminUpdateStorageClass = vi.fn().mockResolvedValue(storageClassFixture({ name: 'standard' }))
 		const api = createFakeViewerAPI({
 			adminCapabilities: vi.fn().mockResolvedValue({
@@ -673,7 +670,6 @@ describe('storageAppShell', () => {
 				}),
 			]),
 			adminUpdateStorageClass,
-			adminUpdateStorageClassPolicy,
 			listPVCs: vi.fn().mockResolvedValue([]),
 		})
 
@@ -684,6 +680,8 @@ describe('storageAppShell', () => {
 		expect(screen.getByRole('columnheader', { name: 'Volume binding mode' })).toBeInTheDocument()
 		expect(screen.getByRole('columnheader', { name: 'Allow volume expansion' })).toBeInTheDocument()
 		expect(screen.getByRole('columnheader', { name: 'PVC usage' })).toBeInTheDocument()
+		expect(screen.queryByRole('columnheader', { name: 'Create PVC visibility' })).not.toBeInTheDocument()
+		expect(screen.queryByRole('columnheader', { name: 'Access modes' })).not.toBeInTheDocument()
 		expect(screen.queryAllByRole('button', { name: /^refresh$/i })).toHaveLength(1)
 		expect(await screen.findByText('Retain')).toBeInTheDocument()
 		expect(screen.getByText('WaitForFirstConsumer')).toBeInTheDocument()
@@ -708,14 +706,7 @@ describe('storageAppShell', () => {
 			yaml: expect.stringContaining('test.io/updated'),
 		})))
 
-		await user.click(await screen.findByRole('button', { name: 'Policy' }))
-		await user.click(screen.getByRole('checkbox', { name: 'ReadWriteOnce' }))
-		await user.click(screen.getByRole('checkbox', { name: 'ReadWriteMany' }))
-		await user.click(screen.getByRole('button', { name: 'Save' }))
-		await waitFor(() => expect(adminUpdateStorageClassPolicy).toHaveBeenCalledWith('standard', {
-			allowedAccessModes: ['ReadWriteMany'],
-			visibleInCreate: true,
-		}))
+		expect(screen.queryByRole('button', { name: 'Policy' })).not.toBeInTheDocument()
 
 		await user.click(await screen.findByRole('button', { name: 'Delete' }))
 		await user.type(screen.getByLabelText('Type PVC name to confirm'), 'standard')

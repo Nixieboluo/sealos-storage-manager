@@ -327,13 +327,6 @@ func (req *StorageClassYAMLRequest) authorizationHeader() string {
 	return req.Authorization
 }
 
-func (req *StorageClassPolicyRequest) authorizationHeader() string {
-	if req == nil {
-		return ""
-	}
-	return req.Authorization
-}
-
 func (req *CreateViewerSessionRequest) authorizationHeader() string {
 	if req == nil {
 		return ""

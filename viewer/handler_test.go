@@ -40,12 +40,10 @@ type viewerSessionCall struct {
 }
 
 type fakeStorageClassService struct {
-	items       []domain.StorageClass
-	yaml        *session.StorageClassYAML
-	describe    *session.StorageClassDescribe
-	item        *domain.StorageClass
-	policyInput *session.StorageClassPolicyInput
-	policyName  *string
+	items    []domain.StorageClass
+	yaml     *session.StorageClassYAML
+	describe *session.StorageClassDescribe
+	item     *domain.StorageClass
 }
 
 const testKubeconfig = `apiVersion: v1
@@ -228,20 +226,6 @@ func (f fakeStorageClassService) CreateStorageClass(_ context.Context, _ string)
 }
 
 func (f fakeStorageClassService) UpdateStorageClass(_ context.Context, _ string, _ string) (*domain.StorageClass, error) {
-	return f.item, nil
-}
-
-func (f fakeStorageClassService) UpdateStorageClassPolicy(
-	_ context.Context,
-	name string,
-	input session.StorageClassPolicyInput,
-) (*domain.StorageClass, error) {
-	if f.policyName != nil {
-		*f.policyName = name
-	}
-	if f.policyInput != nil {
-		*f.policyInput = input
-	}
 	return f.item, nil
 }
 

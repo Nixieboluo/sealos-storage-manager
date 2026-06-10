@@ -8,7 +8,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
 	Dialog,
 	DialogContent,
@@ -24,7 +23,6 @@ import { adminStorageClassDescribeQueryOptions, adminStorageClassYAMLQueryOption
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'))
 const largeEditorDialogClassName = 'h-[88vh] max-h-[88vh] w-[min(96vw,90rem)] sm:max-w-[min(96vw,90rem)]'
-const storageClassAccessModes = ['ReadWriteOnce', 'ReadOnlyMany', 'ReadWriteMany'] as const
 
 type StorageClassEditorState
 	= | { mode: 'create' }
@@ -164,123 +162,6 @@ export function StorageClassDescribeDialog({
 	)
 }
 
-export function StorageClassPolicyDialog({
-	mutation,
-	onOpenChange,
-	storageClass,
-}: {
-	mutation: UseMutationResult<StorageClass, Error, { allowedAccessModes: string[], name: string, visibleInCreate: boolean }>
-	onOpenChange: (storageClass: StorageClass | null) => void
-	storageClass: StorageClass | null
-}) {
-	const { t } = useTranslation()
-	const [draft, setDraft] = useState({
-		key: '',
-		allowedAccessModes: [] as string[],
-		visibleInCreate: false,
-	})
-	const open = storageClass !== null
-	const key = storageClass?.name ?? ''
-	const allowedAccessModes = draft.key === key
-		? draft.allowedAccessModes
-		: storageClass?.allowed_access_modes ?? []
-	const visibleInCreate = draft.key === key
-		? draft.visibleInCreate
-		: storageClass?.visible_in_create ?? false
-	const canSave = Boolean(storageClass)
-		&& !mutation.isPending
-		&& (!visibleInCreate || allowedAccessModes.length > 0)
-
-	function setVisibleInCreate(nextVisible: boolean) {
-		if (!storageClass) {
-			return
-		}
-		setDraft({
-			key: storageClass.name,
-			allowedAccessModes,
-			visibleInCreate: nextVisible,
-		})
-	}
-
-	function toggleAccessMode(mode: string, checked: boolean) {
-		if (!storageClass) {
-			return
-		}
-		const nextModes = checked
-			? [...allowedAccessModes, mode]
-			: allowedAccessModes.filter(item => item !== mode)
-		setDraft({
-			key: storageClass.name,
-			allowedAccessModes: storageClassAccessModes.filter(item => nextModes.includes(item)),
-			visibleInCreate,
-		})
-	}
-
-	function save() {
-		if (!storageClass) {
-			return
-		}
-		mutation.mutate({
-			name: storageClass.name,
-			allowedAccessModes,
-			visibleInCreate,
-		}, {
-			onSuccess: () => {
-				toast.success(t('storageClasses.policySaved'))
-				onOpenChange(null)
-			},
-			onError: error => showViewerErrorToast(error, t),
-		})
-	}
-
-	return (
-		<Dialog onOpenChange={nextOpen => !mutation.isPending && onOpenChange(nextOpen ? storageClass : null)} open={open}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>{t('storageClasses.policy')}</DialogTitle>
-					<DialogDescription>{storageClass?.name}</DialogDescription>
-				</DialogHeader>
-				<div className="flex flex-col gap-4">
-					<label className="flex items-center gap-3 rounded-md border p-3 text-sm">
-						<Checkbox
-							checked={visibleInCreate}
-							disabled={mutation.isPending}
-							onCheckedChange={checked => setVisibleInCreate(checked === true)}
-						/>
-						<span className="font-medium">{t('storageClasses.visibleInCreate')}</span>
-					</label>
-					<div className="flex flex-col gap-3 rounded-md border p-3">
-						<div className="text-sm font-medium">{t('viewer.accessModes')}</div>
-						<div className="grid gap-3 sm:grid-cols-3">
-							{storageClassAccessModes.map(mode => (
-								<label key={mode} className="flex items-center gap-3 text-sm">
-									<Checkbox
-										checked={allowedAccessModes.includes(mode)}
-										disabled={mutation.isPending}
-										onCheckedChange={checked => toggleAccessMode(mode, checked === true)}
-									/>
-									<span>{mode}</span>
-								</label>
-							))}
-						</div>
-					</div>
-					{visibleInCreate && allowedAccessModes.length === 0
-						? <p className="text-sm text-destructive">{t('storageClasses.accessModeRequired')}</p>
-						: null}
-				</div>
-				<DialogFooter>
-					<Button disabled={mutation.isPending} onClick={() => onOpenChange(null)} type="button" variant="outline">
-						{t('actions.cancel')}
-					</Button>
-					<Button disabled={!canSave} onClick={save} type="button">
-						{t('actions.save')}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	)
-}
-
 export function DeleteStorageClassDialog({
 	mutation,
 	name,
@@ -366,9 +247,6 @@ metadata:
   name: example
   labels:
     app.kubernetes.io/managed-by: sealos-storage-manager
-  annotations:
-    storage-management.sealos.io/visible-in-create: "true"
-    storage-management.sealos.io/access-modes: "ReadWriteOnce"
 provisioner: example.com/provisioner
 reclaimPolicy: Delete
 volumeBindingMode: Immediate

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
-	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/kube"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	corev1 "k8s.io/api/core/v1"
@@ -14,63 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
-
-func TestStorageClassAccessPolicy(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		annotations map[string]string
-		wantModes   []string
-		wantStatus  string
-	}{
-		{
-			name:       "hidden without annotations",
-			wantModes:  []string{},
-			wantStatus: storageClassAnnotationHidden,
-		},
-		{
-			name: "ready",
-			annotations: map[string]string{
-				StorageClassVisibleAnnotation:     "true",
-				StorageClassAccessModesAnnotation: "ReadWriteOnce, ReadWriteMany",
-			},
-			wantModes:  []string{domain.AccessModeReadWriteOnce, domain.AccessModeReadWriteMany},
-			wantStatus: storageClassAnnotationReady,
-		},
-		{
-			name: "invalid unsupported mode",
-			annotations: map[string]string{
-				StorageClassVisibleAnnotation:     "true",
-				StorageClassAccessModesAnnotation: "ReadWriteOncePod",
-			},
-			wantModes:  []string{},
-			wantStatus: storageClassAnnotationInvalid,
-		},
-		{
-			name: "invalid empty modes",
-			annotations: map[string]string{
-				StorageClassVisibleAnnotation: "true",
-			},
-			wantModes:  []string{},
-			wantStatus: storageClassAnnotationInvalid,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			gotModes, gotStatus := StorageClassAccessPolicy(tt.annotations)
-
-			if strings.Join(gotModes, ",") != strings.Join(tt.wantModes, ",") {
-				t.Fatalf("modes = %#v, want %#v", gotModes, tt.wantModes)
-			}
-			if gotStatus != tt.wantStatus {
-				t.Fatalf("status = %q, want %q", gotStatus, tt.wantStatus)
-			}
-		})
-	}
-}
 
 func TestStorageClassServiceCRUDYAMLAndDescribe(t *testing.T) {
 	t.Parallel()
@@ -86,18 +28,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: fast
-  annotations:
-    storage-management.sealos.io/visible-in-create: "true"
-    storage-management.sealos.io/access-modes: "ReadWriteOnce,ReadWriteMany"
 provisioner: example.test/provisioner
 `
 
 	created, err := service.CreateStorageClass(t.Context(), body)
 	if err != nil {
 		t.Fatalf("CreateStorageClass() error = %v", err)
-	}
-	if !created.VisibleInCreate || strings.Join(created.AllowedAccessModes, ",") != "ReadWriteOnce,ReadWriteMany" {
-		t.Fatalf("created = %#v", created)
 	}
 	if !created.ManagedByStorageManager {
 		t.Fatalf("created managed flag = false: %#v", created)
@@ -120,51 +56,17 @@ provisioner: example.test/provisioner
 	if err != nil {
 		t.Fatalf("DescribeStorageClass() error = %v", err)
 	}
-	if !strings.Contains(describe.Describe, "Visible In Create: true") {
+	if strings.Contains(describe.Describe, "Visible In Create") ||
+		strings.Contains(describe.Describe, "Annotation Status") ||
+		strings.Contains(describe.Describe, "Allowed Access Modes") {
 		t.Fatalf("describe = %s", describe.Describe)
 	}
-	updated, err := service.UpdateStorageClass(t.Context(), "fast", strings.Replace(body, "ReadWriteOnce,ReadWriteMany", "ReadOnlyMany", 1))
+	updated, err := service.UpdateStorageClass(t.Context(), "fast", strings.Replace(body, "example.test/provisioner", "example.test/updated", 1))
 	if err != nil {
 		t.Fatalf("UpdateStorageClass() error = %v", err)
 	}
-	if strings.Join(updated.AllowedAccessModes, ",") != "ReadOnlyMany" {
+	if updated.Provisioner != "example.test/updated" {
 		t.Fatalf("updated = %#v", updated)
-	}
-	policyUpdated, err := service.UpdateStorageClassPolicy(t.Context(), "fast", StorageClassPolicyInput{
-		AllowedAccessModes: []string{"ReadWriteMany", "ReadWriteOnce", "ReadWriteMany"},
-		VisibleInCreate:    true,
-	})
-	if err != nil {
-		t.Fatalf("UpdateStorageClassPolicy() error = %v", err)
-	}
-	if strings.Join(policyUpdated.AllowedAccessModes, ",") != "ReadWriteMany,ReadWriteOnce" {
-		t.Fatalf("policyUpdated = %#v", policyUpdated)
-	}
-	current, err := clientset.StorageV1().StorageClasses().Get(t.Context(), "fast", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get storageclass: %v", err)
-	}
-	if current.Annotations[StorageClassVisibleAnnotation] != "true" {
-		t.Fatalf("visible annotation = %q", current.Annotations[StorageClassVisibleAnnotation])
-	}
-	if current.Annotations[StorageClassAccessModesAnnotation] != "ReadWriteMany,ReadWriteOnce" {
-		t.Fatalf("access modes annotation = %q", current.Annotations[StorageClassAccessModesAnnotation])
-	}
-	hidden, err := service.UpdateStorageClassPolicy(t.Context(), "fast", StorageClassPolicyInput{
-		VisibleInCreate: false,
-	})
-	if err != nil {
-		t.Fatalf("UpdateStorageClassPolicy(hidden) error = %v", err)
-	}
-	if hidden.VisibleInCreate || len(hidden.AllowedAccessModes) != 0 {
-		t.Fatalf("hidden = %#v", hidden)
-	}
-	current, err = clientset.StorageV1().StorageClasses().Get(t.Context(), "fast", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get hidden storageclass: %v", err)
-	}
-	if _, ok := current.Annotations[StorageClassAccessModesAnnotation]; ok {
-		t.Fatalf("access modes annotation still present: %#v", current.Annotations)
 	}
 	deleted, err := service.DeleteStorageClass(t.Context(), "fast")
 	if err != nil {
@@ -300,7 +202,7 @@ metadata:
 	}
 }
 
-func TestStorageClassServiceListFiltersHidden(t *testing.T) {
+func TestStorageClassServiceListReturnsAllStorageClasses(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig()
@@ -309,10 +211,6 @@ func TestStorageClassServiceListFiltersHidden(t *testing.T) {
 			&storagev1.StorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "visible",
-					Annotations: map[string]string{
-						StorageClassVisibleAnnotation:     "true",
-						StorageClassAccessModesAnnotation: "ReadWriteOnce",
-					},
 				},
 				Provisioner: "example.test/provisioner",
 			},
@@ -328,7 +226,7 @@ func TestStorageClassServiceListFiltersHidden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListStorageClasses(false) error = %v", err)
 	}
-	if len(visible) != 1 || visible[0].Name != "visible" {
+	if len(visible) != 2 {
 		t.Fatalf("visible = %#v", visible)
 	}
 	all, err := service.ListStorageClasses(t.Context(), true)

@@ -112,18 +112,6 @@ func (h *Handler) AdminUpdateStorageClass(w http.ResponseWriter, req *http.Reque
 	writeHTTPResponse(w, response, err)
 }
 
-func (h *Handler) AdminUpdateStorageClassPolicy(w http.ResponseWriter, req *http.Request) {
-	var body StorageClassPolicyRequest
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeHTTPResponse(w, nil, apienv.NewError(400, apienv.CodeValidationError, "Invalid JSON request", nil))
-		return
-	}
-	body.Authorization = req.Header.Get("Authorization")
-	name := strings.TrimSuffix(pathID(req.URL.Path, "/admin/storage-classes/"), "/policy")
-	response, err := h.adminUpdateStorageClassPolicy(req.Context(), name, &body)
-	writeHTTPResponse(w, response, err)
-}
-
 func (h *Handler) AdminDeleteStorageClass(w http.ResponseWriter, req *http.Request) {
 	name := pathID(req.URL.Path, "/admin/storage-classes/")
 	response, err := h.adminDeleteStorageClass(req.Context(), name, authenticatedRequest(req))

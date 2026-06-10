@@ -51,6 +51,8 @@ backend:
         loginUrlMode: internal
       fileManagement:
         enabled: true
+      pvcCreation:
+        enabled: true
       pod:
         serviceAccountName: ""
         mountPath: /srv

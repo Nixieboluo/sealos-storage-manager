@@ -85,15 +85,6 @@ func AdminUpdateStorageClass(
 	return runtimeHandler().AdminUpdateStorageClassData(ctx, name, req)
 }
 
-//encore:api public method=PUT path=/admin/storage-classes/:name/policy
-func AdminUpdateStorageClassPolicy(
-	ctx context.Context,
-	name string,
-	req *StorageClassPolicyRequest,
-) (*StorageClassResponse, error) {
-	return runtimeHandler().AdminUpdateStorageClassPolicyData(ctx, name, req)
-}
-
 //encore:api public method=DELETE path=/admin/storage-classes/:name
 func AdminDeleteStorageClass(
 	ctx context.Context,

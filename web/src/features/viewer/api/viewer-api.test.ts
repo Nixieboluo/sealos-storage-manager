@@ -118,7 +118,13 @@ describe('viewer API adapter', () => {
 			storage_class_list: { items: [storageClassFixture({ name: 'standard' })] },
 		})
 		const adminCapabilities = vi.fn().mockResolvedValue({
-			admin_capabilities: { can_manage_pvcs: true, can_manage_storage_classes: true, file_management_enabled: true, user_namespace: 'ns-admin' },
+			admin_capabilities: {
+				can_manage_pvcs: true,
+				can_manage_storage_classes: true,
+				file_management_enabled: true,
+				pvc_creation_enabled: true,
+				user_namespace: 'ns-admin',
+			},
 		})
 		const adminCreateStorageClass = vi.fn().mockResolvedValue({
 			storage_class: storageClassFixture({ name: 'created' }),
@@ -140,9 +146,6 @@ describe('viewer API adapter', () => {
 		})
 		const adminUpdateStorageClass = vi.fn().mockResolvedValue({
 			storage_class: storageClassFixture({ name: 'standard' }),
-		})
-		const adminUpdateStorageClassPolicy = vi.fn().mockResolvedValue({
-			storage_class: storageClassFixture({ name: 'standard', allowed_access_modes: ['ReadWriteMany'] }),
 		})
 		const createPVC = vi.fn().mockResolvedValue({
 			pvc: pvcFixture({ name: 'cache-data' }),
@@ -169,7 +172,6 @@ describe('viewer API adapter', () => {
 				AdminListNamespaces: adminListNamespaces,
 				AdminListStorageClasses: adminListStorageClasses,
 				AdminUpdateStorageClass: adminUpdateStorageClass,
-				AdminUpdateStorageClassPolicy: adminUpdateStorageClassPolicy,
 				ListPVCs: listPVCs,
 				ListStorageClasses: listStorageClasses,
 				CreatePVC: createPVC,
@@ -193,7 +195,13 @@ describe('viewer API adapter', () => {
 		await expect(api.listStorageClasses()).resolves.toEqual([
 			expect.objectContaining({ name: 'standard' }),
 		])
-		await expect(api.adminCapabilities()).resolves.toEqual({ can_manage_pvcs: true, can_manage_storage_classes: true, file_management_enabled: true, user_namespace: 'ns-admin' })
+		await expect(api.adminCapabilities()).resolves.toEqual({
+			can_manage_pvcs: true,
+			can_manage_storage_classes: true,
+			file_management_enabled: true,
+			pvc_creation_enabled: true,
+			user_namespace: 'ns-admin',
+		})
 		await expect(api.adminListNamespaces()).resolves.toEqual([
 			expect.objectContaining({ name: 'kube-system' }),
 		])
@@ -204,10 +212,6 @@ describe('viewer API adapter', () => {
 		await expect(api.adminDescribeStorageClass('standard')).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
 		await expect(api.adminCreateStorageClass({ yaml: 'kind: StorageClass' })).resolves.toEqual(expect.objectContaining({ name: 'created' }))
 		await expect(api.adminUpdateStorageClass('standard', { yaml: 'kind: StorageClass' })).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
-		await expect(api.adminUpdateStorageClassPolicy('standard', {
-			allowedAccessModes: ['ReadWriteMany'],
-			visibleInCreate: true,
-		})).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
 		await expect(api.adminDeleteStorageClass('standard')).resolves.toEqual(expect.objectContaining({ name: 'standard' }))
 		await expect(api.createPVC({
 			namespace: 'default',
@@ -261,11 +265,6 @@ describe('viewer API adapter', () => {
 		expect(adminUpdateStorageClass).toHaveBeenCalledWith('standard', {
 			Authorization: 'Bearer test-kubeconfig',
 			yaml: 'kind: StorageClass',
-		})
-		expect(adminUpdateStorageClassPolicy).toHaveBeenCalledWith('standard', {
-			Authorization: 'Bearer test-kubeconfig',
-			allowed_access_modes: ['ReadWriteMany'],
-			visible_in_create: true,
 		})
 		expect(adminDeleteStorageClass).toHaveBeenCalledWith('standard', {
 			Authorization: 'Bearer test-kubeconfig',

@@ -38,7 +38,6 @@ export const backendViewerErrorCodes = [
 	'PVC_MOUNT_CONFLICT',
 	'PVC_MOUNT_PENDING',
 	'STORAGE_CLASS_NOT_FOUND',
-	'STORAGE_CLASS_NOT_VISIBLE',
 	'STORAGE_CLASS_YAML_INVALID',
 	'STORAGE_CLASS_CONFLICT',
 	'STORAGE_CLASS_DELETE_FORBIDDEN',
@@ -79,16 +78,12 @@ export interface AdminCapabilities {
 	can_manage_pvcs: boolean
 	can_manage_storage_classes: boolean
 	file_management_enabled: boolean
+	pvc_creation_enabled?: boolean
 	user_namespace: string
 }
 
 export interface StorageClassYAMLInput {
 	yaml: string
-}
-
-export interface StorageClassPolicyInput {
-	allowedAccessModes: string[]
-	visibleInCreate: boolean
 }
 
 export interface DeletePVCInput {
@@ -115,7 +110,6 @@ export interface ViewerAPI {
 	adminGetStorageClassYAML: (name: string) => Promise<StorageClassYAML>
 	adminListNamespaces: () => Promise<AdminNamespace[]>
 	adminListStorageClasses: () => Promise<StorageClass[]>
-	adminUpdateStorageClassPolicy: (name: string, input: StorageClassPolicyInput) => Promise<StorageClass>
 	adminUpdateStorageClass: (name: string, input: StorageClassYAMLInput) => Promise<StorageClass>
 	closePodSession: (podSessionID: string) => Promise<PodSession>
 	closeViewerSession: (viewerSessionID: string) => Promise<ViewerSession>

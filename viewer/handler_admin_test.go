@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nixieboluo/sealos-storage-manager/internal/apienv"
+	"github.com/nixieboluo/sealos-storage-manager/internal/config"
 	"github.com/nixieboluo/sealos-storage-manager/internal/domain"
 	"github.com/nixieboluo/sealos-storage-manager/internal/observability"
 	"github.com/nixieboluo/sealos-storage-manager/internal/session"
@@ -42,14 +43,20 @@ func TestHandlerAdminCapabilitiesReturnsFalseForNonAdmin(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), `"file_management_enabled":true`) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
+	if !strings.Contains(recorder.Body.String(), `"pvc_creation_enabled":true`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
 	if !strings.Contains(recorder.Body.String(), `"user_namespace":"ns-admin"`) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
 
-func TestHandlerAdminCapabilitiesReportsFileManagementDisabled(t *testing.T) {
+func TestHandlerAdminCapabilitiesReportsDisabledFeatures(t *testing.T) {
 	t.Parallel()
 
+	cfg := config.Default()
+	cfg.Viewer.FileManagement.Enabled = false
+	cfg.Viewer.PVCCreation.Enabled = false
 	handler := NewHandler(
 		&fakeViewerService{},
 		fakePodService{},
@@ -58,7 +65,7 @@ func TestHandlerAdminCapabilitiesReportsFileManagementDisabled(t *testing.T) {
 		observability.MustNew(testObservability(), nil),
 		allowAuthorizer{},
 		WithAdminAuthorizer(allowAdminAuthorizer{}),
-		WithFeatureConfig(testDisabledFileManagement()),
+		WithFeatureConfig(cfg.Features()),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/admin/capabilities", nil)
 	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
@@ -73,6 +80,9 @@ func TestHandlerAdminCapabilitiesReportsFileManagementDisabled(t *testing.T) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
 	if !strings.Contains(recorder.Body.String(), `"file_management_enabled":false`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"pvc_creation_enabled":false`) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
@@ -235,12 +245,6 @@ func TestHandlerAdminStorageClassEndpointsUseEnvelope(t *testing.T) {
 			name:   "update",
 			req:    httptest.NewRequest(http.MethodPut, "/admin/storage-classes/standard", strings.NewReader(`{"yaml":"kind: StorageClass\n"}`)),
 			handle: (*Handler).AdminUpdateStorageClass,
-			want:   "storage_class",
-		},
-		{
-			name:   "update policy",
-			req:    httptest.NewRequest(http.MethodPut, "/admin/storage-classes/standard/policy", strings.NewReader(`{"visible_in_create":true,"allowed_access_modes":["ReadWriteOnce","ReadWriteMany"]}`)),
-			handle: (*Handler).AdminUpdateStorageClassPolicy,
 			want:   "storage_class",
 		},
 		{
@@ -608,46 +612,6 @@ func TestHandlerAdminViewerSessionMarksAdminContext(t *testing.T) {
 	}
 	if input.Namespace != "kube-system" {
 		t.Fatalf("namespace = %q", input.Namespace)
-	}
-}
-
-func TestHandlerAdminUpdateStorageClassPolicyMapsRequest(t *testing.T) {
-	t.Parallel()
-
-	var policyInput session.StorageClassPolicyInput
-	var policyName string
-	handler := NewHandler(
-		&fakeViewerService{},
-		fakePodService{},
-		fakeAuthService{},
-		nil,
-		observability.MustNew(testObservability(), nil),
-		allowAuthorizer{},
-		WithAdminAuthorizer(allowAdminAuthorizer{}),
-		WithStorageClassService(fakeStorageClassService{
-			item:        &domain.StorageClass{Name: "standard", Provisioner: "test"},
-			policyInput: &policyInput,
-			policyName:  &policyName,
-		}),
-	)
-	req := httptest.NewRequest(
-		http.MethodPut,
-		"/admin/storage-classes/standard/policy",
-		strings.NewReader(`{"visible_in_create":true,"allowed_access_modes":["ReadWriteOnce","ReadWriteMany"]}`),
-	)
-	req.Header.Set("Authorization", url.QueryEscape(testUserNamespaceKubeconfig))
-	recorder := httptest.NewRecorder()
-
-	handler.AdminUpdateStorageClassPolicy(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
-	}
-	if policyName != "standard" {
-		t.Fatalf("policyName = %q", policyName)
-	}
-	if !policyInput.VisibleInCreate || strings.Join(policyInput.AllowedAccessModes, ",") != "ReadWriteOnce,ReadWriteMany" {
-		t.Fatalf("policyInput = %#v", policyInput)
 	}
 }
 

@@ -95,15 +95,6 @@ func (h *Handler) AdminUpdateStorageClassData(
 	return response, toEncoreError(apiErr)
 }
 
-func (h *Handler) AdminUpdateStorageClassPolicyData(
-	ctx context.Context,
-	name string,
-	req *StorageClassPolicyRequest,
-) (*StorageClassResponse, error) {
-	response, apiErr := h.adminUpdateStorageClassPolicy(ctx, name, req)
-	return response, toEncoreError(apiErr)
-}
-
 func (h *Handler) AdminDeleteStorageClassData(
 	ctx context.Context,
 	name string,

@@ -87,6 +87,7 @@ type AdminCapabilitySet struct {
 	CanManagePVCs           bool   `json:"can_manage_pvcs"`
 	CanManageStorageClasses bool   `json:"can_manage_storage_classes"`
 	FileManagementEnabled   bool   `json:"file_management_enabled"`
+	PVCCreationEnabled      bool   `json:"pvc_creation_enabled"`
 	UserNamespace           string `json:"user_namespace"`
 }
 
@@ -105,12 +106,6 @@ type StorageClassYAMLResponse struct {
 type StorageClassYAMLRequest struct {
 	Authorization string `header:"Authorization" encore:"sensitive"`
 	YAML          string `json:"yaml"`
-}
-
-type StorageClassPolicyRequest struct {
-	Authorization      string   `header:"Authorization" encore:"sensitive"`
-	VisibleInCreate    bool     `json:"visible_in_create"`
-	AllowedAccessModes []string `json:"allowed_access_modes"`
 }
 
 type StorageClassDescribeResponse struct {

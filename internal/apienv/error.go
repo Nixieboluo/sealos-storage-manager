@@ -17,7 +17,6 @@ const (
 	CodePVCExpandUnsupported        Code = "PVC_EXPAND_UNSUPPORTED"
 	CodePVCExpandNotIncreased       Code = "PVC_EXPAND_NOT_INCREASED"
 	CodeStorageClassNotFound        Code = "STORAGE_CLASS_NOT_FOUND"
-	CodeStorageClassNotVisible      Code = "STORAGE_CLASS_NOT_VISIBLE"
 	CodeStorageClassYAMLInvalid     Code = "STORAGE_CLASS_YAML_INVALID"
 	CodeStorageClassConflict        Code = "STORAGE_CLASS_CONFLICT"
 	CodeStorageClassDeleteForbidden Code = "STORAGE_CLASS_DELETE_FORBIDDEN"
@@ -54,7 +53,6 @@ var AllCodes = [...]Code{
 	CodePVCExpandUnsupported,
 	CodePVCExpandNotIncreased,
 	CodeStorageClassNotFound,
-	CodeStorageClassNotVisible,
 	CodeStorageClassYAMLInvalid,
 	CodeStorageClassConflict,
 	CodeStorageClassDeleteForbidden,

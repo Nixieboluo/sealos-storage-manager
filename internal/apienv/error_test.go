@@ -32,7 +32,6 @@ func TestAllCodesContainsEveryPublicBusinessCode(t *testing.T) {
 		CodePVCExpandUnsupported,
 		CodePVCExpandNotIncreased,
 		CodeStorageClassNotFound,
-		CodeStorageClassNotVisible,
 		CodeStorageClassYAMLInvalid,
 		CodeStorageClassConflict,
 		CodeStorageClassDeleteForbidden,

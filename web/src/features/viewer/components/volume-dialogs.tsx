@@ -2,7 +2,7 @@ import type { UseMutationResult } from '@tanstack/react-query'
 import type { PVC, StorageClass } from '@/features/viewer/types/viewer'
 
 import { useForm } from '@tanstack/react-form'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -36,6 +36,7 @@ const defaultCreatePVCForm: CreatePVCForm = {
 	name: '',
 }
 
+const pvcAccessModes = ['ReadWriteOnce', 'ReadOnlyMany', 'ReadWriteMany'] as const
 const bytesPerGi = 1024 * 1024 * 1024
 
 interface CreatePVCVariables {
@@ -80,21 +81,14 @@ export function CreatePVCDialog({
 	storageClasses,
 }: CreatePVCDialogProps) {
 	const { t } = useTranslation()
-	const visibleStorageClasses = useMemo(
-		() => storageClasses.filter(storageClass =>
-			storageClass.visible_in_create && storageClass.allowed_access_modes.length > 0,
-		),
-		[storageClasses],
-	)
-	const firstStorageClass = visibleStorageClasses[0]
+	const firstStorageClass = storageClasses[0]
 	const [selection, setSelection] = useState({ accessMode: '', storageClassName: '' })
-	const activeStorageClassName = visibleStorageClasses.some(storageClass => storageClass.name === selection.storageClassName)
+	const activeStorageClassName = storageClasses.some(storageClass => storageClass.name === selection.storageClassName)
 		? selection.storageClassName
 		: firstStorageClass?.name ?? ''
-	const activeStorageClass = visibleStorageClasses.find(storageClass => storageClass.name === activeStorageClassName)
-	const activeAccessMode = activeStorageClass?.allowed_access_modes.includes(selection.accessMode)
+	const activeAccessMode = (pvcAccessModes as readonly string[]).includes(selection.accessMode)
 		? selection.accessMode
-		: activeStorageClass?.allowed_access_modes[0] ?? ''
+		: pvcAccessModes[0]
 	const form = useForm({
 		defaultValues: {
 			...defaultCreatePVCForm,
@@ -208,9 +202,8 @@ export function CreatePVCDialog({
 					<FormField id="pvc-storage-class" label={t('volumes.storageClass')}>
 						<Select
 							onValueChange={(value) => {
-								const nextStorageClass = visibleStorageClasses.find(storageClass => storageClass.name === value)
 								setSelection({
-									accessMode: nextStorageClass?.allowed_access_modes[0] ?? '',
+									accessMode: activeAccessMode,
 									storageClassName: value,
 								})
 							}}
@@ -221,7 +214,7 @@ export function CreatePVCDialog({
 							</SelectTrigger>
 							<SelectContent>
 								<SelectGroup>
-									{visibleStorageClasses.map(storageClass => (
+									{storageClasses.map(storageClass => (
 										<SelectItem key={storageClass.name} value={storageClass.name}>
 											{storageClass.name}
 											{storageClass.is_default ? ` · ${t('common.default')}` : ''}
@@ -244,14 +237,14 @@ export function CreatePVCDialog({
 							</SelectTrigger>
 							<SelectContent>
 								<SelectGroup>
-									{(activeStorageClass?.allowed_access_modes ?? []).map(mode => (
+									{pvcAccessModes.map(mode => (
 										<SelectItem key={mode} value={mode}>{mode}</SelectItem>
 									))}
 								</SelectGroup>
 							</SelectContent>
 						</Select>
 					</FormField>
-					{visibleStorageClasses.length === 0
+					{storageClasses.length === 0
 						? <p className="text-sm text-muted-foreground">{t('volumes.noAvailableStorageClasses')}</p>
 						: null}
 					<DialogFooter>

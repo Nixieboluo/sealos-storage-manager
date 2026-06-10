@@ -48,9 +48,6 @@ func (s *StorageClassService) ListStorageClasses(ctx context.Context, includeHid
 		item := StorageClassToDomain(storageClass)
 		item.InUsePVCCount = usage[item.Name]
 		item.DeleteBlockedReason = storageClassDeleteBlockedReason(item)
-		if !includeHidden && !item.VisibleInCreate {
-			continue
-		}
 		items = append(items, item)
 	}
 	return items, nil
@@ -139,54 +136,6 @@ func (s *StorageClassService) UpdateStorageClass(
 		}
 		if apierrors.IsConflict(err) {
 			return nil, apienv.NewError(409, apienv.CodeStorageClassConflict, "StorageClass was modified; reload YAML and retry", nil)
-		}
-		return nil, err
-	}
-	result := StorageClassToDomain(*updated)
-	return &result, nil
-}
-
-func (s *StorageClassService) UpdateStorageClassPolicy(
-	ctx context.Context,
-	name string,
-	input StorageClassPolicyInput,
-) (item *domain.StorageClass, err error) {
-	ctx, finish := s.recorder.TraceOperation(ctx, "storageclass.update_policy", slog.String("storageclass", name))
-	defer func() {
-		finish(err)
-	}()
-
-	allowedModes, err := normalizeStorageClassAccessModes(input.AllowedAccessModes)
-	if err != nil {
-		return nil, err
-	}
-	current, err := s.kube.GetStorageClass(ctx, name)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, apienv.NewError(404, apienv.CodeStorageClassNotFound, "StorageClass not found", nil)
-		}
-		return nil, err
-	}
-	if current.Annotations == nil {
-		current.Annotations = map[string]string{}
-	}
-	if input.VisibleInCreate {
-		if len(allowedModes) == 0 {
-			return nil, apienv.NewError(400, apienv.CodeValidationError, "StorageClass visible policy requires at least one access mode", nil)
-		}
-		current.Annotations[StorageClassVisibleAnnotation] = "true"
-		current.Annotations[StorageClassAccessModesAnnotation] = strings.Join(allowedModes, ",")
-	} else {
-		current.Annotations[StorageClassVisibleAnnotation] = "false"
-		delete(current.Annotations, StorageClassAccessModesAnnotation)
-	}
-	updated, err := s.kube.UpdateStorageClass(ctx, current)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, apienv.NewError(404, apienv.CodeStorageClassNotFound, "StorageClass not found", nil)
-		}
-		if apierrors.IsConflict(err) {
-			return nil, apienv.NewError(409, apienv.CodeStorageClassConflict, "StorageClass was modified; reload and retry", nil)
 		}
 		return nil, err
 	}

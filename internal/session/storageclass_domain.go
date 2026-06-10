@@ -16,7 +16,6 @@ func StorageClassToDomain(storageClass storagev1.StorageClass) domain.StorageCla
 	if storageClass.ReclaimPolicy != nil {
 		reclaimPolicy = string(*storageClass.ReclaimPolicy)
 	}
-	allowedModes, status := StorageClassAccessPolicy(storageClass.Annotations)
 	return domain.StorageClass{
 		Name:                     storageClass.Name,
 		Provisioner:              storageClass.Provisioner,
@@ -25,9 +24,6 @@ func StorageClassToDomain(storageClass storagev1.StorageClass) domain.StorageCla
 		IsDefault:                storageClass.Annotations["storageclass.kubernetes.io/is-default-class"] == "true",
 		ReclaimPolicy:            reclaimPolicy,
 		CreationTimestampRFC3339: storageClass.CreationTimestamp.Format(time.RFC3339),
-		VisibleInCreate:          status == storageClassAnnotationReady,
-		AllowedAccessModes:       allowedModes,
-		AnnotationStatus:         status,
 		ManagedByStorageManager:  storageClass.Labels[ManagedByLabel] == ManagedByValue,
 	}
 }

@@ -11,7 +11,6 @@ import type {
 	PVC,
 	StorageClass,
 	StorageClassDescribe,
-	StorageClassPolicyInput,
 	StorageClassYAML,
 	StorageClassYAMLInput,
 	ViewerAPI,
@@ -140,20 +139,6 @@ export function createViewerApi(
 				const response = await activeClient.viewer.AdminUpdateStorageClass(name, {
 					Authorization: authorization(),
 					yaml: input.yaml,
-				})
-				return response.storage_class
-			}
-			catch (error) {
-				throw normalizeViewerError(error)
-			}
-		},
-
-		async adminUpdateStorageClassPolicy(name: string, input: StorageClassPolicyInput): Promise<StorageClass> {
-			try {
-				const response = await activeClient.viewer.AdminUpdateStorageClassPolicy(name, {
-					Authorization: authorization(),
-					visible_in_create: input.visibleInCreate,
-					allowed_access_modes: input.allowedAccessModes,
 				})
 				return response.storage_class
 			}

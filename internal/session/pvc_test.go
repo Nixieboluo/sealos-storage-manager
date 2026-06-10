@@ -24,10 +24,6 @@ func TestViewerServiceCreatePVC(t *testing.T) {
 	clientset := fake.NewSimpleClientset(&storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "standard",
-			Annotations: map[string]string{
-				StorageClassVisibleAnnotation:     "true",
-				StorageClassAccessModesAnnotation: "ReadWriteOnce",
-			},
 		},
 		Provisioner: "example.test/provisioner",
 	})
@@ -110,46 +106,13 @@ func TestViewerServiceListPVCsIncludesStorageClassName(t *testing.T) {
 	}
 }
 
-func TestViewerServiceCreatePVCRejectsHiddenStorageClass(t *testing.T) {
-	t.Parallel()
-
-	cfg := testConfig()
-	client := kube.New(fake.NewSimpleClientset(&storagev1.StorageClass{
-		ObjectMeta:  metav1.ObjectMeta{Name: "hidden"},
-		Provisioner: "example.test/provisioner",
-	}))
-	store := state.New(cfg.Cache)
-	pods := NewPodService(cfg, store, client, observability.MustNew(cfg.Observability, nil))
-	service := NewViewerService(cfg, store, client, pods, nil, observability.MustNew(cfg.Observability, nil))
-
-	_, err := service.CreatePVC(t.Context(), CreatePVCInput{
-		Namespace:        "default",
-		Name:             "data",
-		Capacity:         "2Gi",
-		AccessModes:      []string{domain.AccessModeReadWriteOnce},
-		StorageClassName: "hidden",
-	})
-
-	var apiErr *apienv.Error
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("CreatePVC() error = %T %v, want apienv.Error", err, err)
-	}
-	if apiErr.Code != apienv.CodeStorageClassNotVisible {
-		t.Fatalf("code = %s, want %s", apiErr.Code, apienv.CodeStorageClassNotVisible)
-	}
-}
-
-func TestViewerServiceCreatePVCRejectsAccessModeOutsideStorageClassPolicy(t *testing.T) {
+func TestViewerServiceCreatePVCRejectsUnsupportedAccessMode(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig()
 	client := kube.New(fake.NewSimpleClientset(&storagev1.StorageClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "standard",
-			Annotations: map[string]string{
-				StorageClassVisibleAnnotation:     "true",
-				StorageClassAccessModesAnnotation: "ReadWriteOnce",
-			},
 		},
 		Provisioner: "example.test/provisioner",
 	}))
@@ -161,7 +124,7 @@ func TestViewerServiceCreatePVCRejectsAccessModeOutsideStorageClassPolicy(t *tes
 		Namespace:        "default",
 		Name:             "data",
 		Capacity:         "2Gi",
-		AccessModes:      []string{domain.AccessModeReadWriteMany},
+		AccessModes:      []string{domain.AccessModeReadWriteOncePod},
 		StorageClassName: "standard",
 	})
 

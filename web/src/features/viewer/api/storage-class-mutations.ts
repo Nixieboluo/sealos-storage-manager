@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { StorageClass, StorageClassPolicyInput, StorageClassYAMLInput, ViewerAPI } from '@/features/viewer/types/viewer'
+import type { StorageClass, StorageClassYAMLInput, ViewerAPI } from '@/features/viewer/types/viewer'
 
 import { mutationOptions } from '@tanstack/react-query'
 
@@ -28,29 +28,6 @@ export function adminUpdateStorageClassMutationOptions(
 		mutationKey: viewerKeys.mutations.adminUpdateStorageClass(),
 		mutationFn: (input: { name: string } & StorageClassYAMLInput) =>
 			api.adminUpdateStorageClass(input.name, { yaml: input.yaml }),
-		onSuccess: (storageClass: StorageClass) => {
-			queryClient.setQueryData<StorageClass[]>(
-				viewerKeys.adminStorageClasses(),
-				current => (current ?? []).map(item => item.name === storageClass.name ? storageClass : item),
-			)
-			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClassYAML(storageClass.name) })
-			void queryClient.invalidateQueries({ queryKey: viewerKeys.adminStorageClasses() })
-			void queryClient.invalidateQueries({ queryKey: viewerKeys.storageClasses() })
-		},
-	})
-}
-
-export function adminUpdateStorageClassPolicyMutationOptions(
-	queryClient: QueryClient,
-	api: ViewerAPI = viewerApi,
-) {
-	return mutationOptions({
-		mutationKey: viewerKeys.mutations.adminUpdateStorageClassPolicy(),
-		mutationFn: (input: { name: string } & StorageClassPolicyInput) =>
-			api.adminUpdateStorageClassPolicy(input.name, {
-				allowedAccessModes: input.allowedAccessModes,
-				visibleInCreate: input.visibleInCreate,
-			}),
 		onSuccess: (storageClass: StorageClass) => {
 			queryClient.setQueryData<StorageClass[]>(
 				viewerKeys.adminStorageClasses(),

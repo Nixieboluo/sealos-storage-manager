@@ -102,6 +102,27 @@ func (h *Handler) createPVC(ctx context.Context, req *CreatePVCRequest) (*PVCRes
 		h.observe(ctx, http.MethodPost, "/pvcs", apiErr.Status, start)
 		return nil, apiErr
 	}
+	if !h.features.PVCCreation.Enabled {
+		apiErr := apienv.NewError(403, apienv.CodePVCCreateForbidden, "PVC creation is disabled", map[string]any{
+			"reason": "feature_disabled",
+		})
+		h.recordAudit(ctx, auditDecision{
+			adminAllowed:       op.mode == operationModeAdmin,
+			decision:           "deny",
+			denyReason:         "feature_disabled",
+			identityMethod:     identityMethodForOperation(op),
+			implicitElevation:  op.implicitElevation,
+			kubernetesUsername: op.admin.KubernetesUsername,
+			mode:               op.mode,
+			namespace:          op.namespace,
+			namespaceAllowed:   op.namespaceAllowed,
+			principal:          principal,
+			pvcName:            req.Name,
+			route:              "/pvcs",
+		})
+		h.observe(ctx, http.MethodPost, "/pvcs", apiErr.Status, start)
+		return nil, apiErr
+	}
 	if op.mode == operationModeUser {
 		if err := h.authz.CanCreatePVC(ctx, principal, op.namespace); err != nil {
 			apiErr := apienv.NewError(403, apienv.CodePVCCreateForbidden, "PVC create access denied", nil)

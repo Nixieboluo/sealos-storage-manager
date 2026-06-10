@@ -80,6 +80,8 @@ viewer:
     class_name: nginx
     host_template: viewer-{{ .PodSessionID }}.example.test
     public_scheme: https
+  pvc_creation:
+    enabled: false
   file_management:
     enabled: false
 observability:
@@ -142,6 +144,9 @@ admin:
 	if cfg.Viewer.FileManagement.Enabled {
 		t.Fatal("viewer.file_management.enabled = true")
 	}
+	if cfg.Viewer.PVCCreation.Enabled {
+		t.Fatal("viewer.pvc_creation.enabled = true")
+	}
 	if cfg.Observability.Traces.Endpoint != "http://otel-collector:4318/v1/traces" {
 		t.Fatalf("trace endpoint = %q", cfg.Observability.Traces.Endpoint)
 	}
@@ -162,6 +167,9 @@ func TestDefaultOmitsDeploymentValues(t *testing.T) {
 	cfg := Default()
 	if !cfg.Viewer.FileManagement.Enabled {
 		t.Fatal("viewer.file_management.enabled default = false")
+	}
+	if !cfg.Viewer.PVCCreation.Enabled {
+		t.Fatal("viewer.pvc_creation.enabled default = false")
 	}
 	if cfg.Viewer.BackendVerifyURL != "" ||
 		cfg.Viewer.HookClientToken != "" ||
@@ -429,6 +437,9 @@ func TestDeployChartValuesEmbedValidViewerConfig(t *testing.T) {
 	}
 	if _, err := Load([]byte(viewerYAML)); err != nil {
 		t.Fatalf("embedded deploy viewer.yaml error = %v", err)
+	}
+	if !strings.Contains(viewerYAML, "pvc_creation:\n    enabled: true") {
+		t.Fatalf("viewer.yaml missing pvc_creation feature gate:\n%s", viewerYAML)
 	}
 	for _, forbidden := range []string{
 		"namespace_allowlist",

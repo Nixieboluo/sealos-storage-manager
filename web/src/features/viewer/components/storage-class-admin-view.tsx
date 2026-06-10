@@ -25,7 +25,6 @@ interface StorageClassAdminViewProps {
 	onDelete: (name: string) => void
 	onDescribe: (name: string) => void
 	onEdit: (name: string) => void
-	onEditPolicy: (storageClass: StorageClass) => void
 	query: UseQueryResult<StorageClass[], Error>
 }
 
@@ -34,7 +33,6 @@ export function StorageClassAdminView({
 	onDelete,
 	onDescribe,
 	onEdit,
-	onEditPolicy,
 	query,
 }: StorageClassAdminViewProps) {
 	const { t } = useTranslation()
@@ -66,9 +64,7 @@ export function StorageClassAdminView({
 							<TableHead>{t('storageClasses.reclaimPolicy')}</TableHead>
 							<TableHead>{t('storageClasses.volumeBindingMode')}</TableHead>
 							<TableHead>{t('storageClasses.allowVolumeExpansion')}</TableHead>
-							<TableHead>{t('storageClasses.visibility')}</TableHead>
 							<TableHead>{t('storageClasses.pvcUsage')}</TableHead>
-							<TableHead>{t('viewer.accessModes')}</TableHead>
 							<TableHead className="text-right">{t('files.columns.actions')}</TableHead>
 						</TableRow>
 					</TableHeader>
@@ -83,19 +79,7 @@ export function StorageClassAdminView({
 								<TableCell>{storageClass.reclaim_policy || '-'}</TableCell>
 								<TableCell>{storageClass.volume_binding_mode || '-'}</TableCell>
 								<TableCell>{storageClass.allow_volume_expansion ? t('common.yes') : t('common.no')}</TableCell>
-								<TableCell>
-									<Badge variant={storageClass.visible_in_create ? 'default' : 'outline'}>
-										{storageClass.annotation_status}
-									</Badge>
-								</TableCell>
 								<TableCell>{storageClass.in_use_pvc_count}</TableCell>
-								<TableCell>
-									<div className="flex flex-wrap gap-1">
-										{storageClass.allowed_access_modes.length > 0
-											? storageClass.allowed_access_modes.map(mode => <Badge key={mode} variant="outline">{mode}</Badge>)
-											: <span className="text-sm text-muted-foreground">{t('common.empty')}</span>}
-									</div>
-								</TableCell>
 								<TableCell>
 									<div className="flex justify-end gap-2">
 										<Button onClick={() => onDescribe(storageClass.name)} size="sm" type="button" variant="outline">
@@ -103,9 +87,6 @@ export function StorageClassAdminView({
 										</Button>
 										<Button onClick={() => onEdit(storageClass.name)} size="sm" type="button" variant="outline">
 											{t('actions.edit')}
-										</Button>
-										<Button onClick={() => onEditPolicy(storageClass)} size="sm" type="button" variant="outline">
-											{t('storageClasses.policy')}
 										</Button>
 										<DeleteButton
 											onDelete={() => onDelete(storageClass.name)}
@@ -118,7 +99,7 @@ export function StorageClassAdminView({
 						{items.length === 0
 							? (
 									<TableRow>
-										<TableCell className="py-12 text-center text-muted-foreground" colSpan={9}>
+										<TableCell className="py-12 text-center text-muted-foreground" colSpan={7}>
 											{query.isLoading ? t('common.loading') : t('common.empty')}
 										</TableCell>
 									</TableRow>

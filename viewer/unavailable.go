@@ -91,14 +91,6 @@ func (unavailableStorageClassService) UpdateStorageClass(
 	return nil, errRuntimeUnavailable
 }
 
-func (unavailableStorageClassService) UpdateStorageClassPolicy(
-	_ context.Context,
-	_ string,
-	_ session.StorageClassPolicyInput,
-) (*domain.StorageClass, error) {
-	return nil, errRuntimeUnavailable
-}
-
 func (unavailableStorageClassService) DeleteStorageClass(_ context.Context, _ string) (*domain.StorageClass, error) {
 	return nil, errRuntimeUnavailable
 }

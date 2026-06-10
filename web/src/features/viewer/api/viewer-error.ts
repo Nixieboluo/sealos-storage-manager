@@ -18,7 +18,6 @@ export const viewerErrorMessageKeys = {
 	PVC_MOUNT_CONFLICT: 'errors.pvcMountConflict',
 	PVC_MOUNT_PENDING: 'errors.pvcMountPending',
 	STORAGE_CLASS_NOT_FOUND: 'errors.storageClassNotFound',
-	STORAGE_CLASS_NOT_VISIBLE: 'errors.storageClassNotVisible',
 	STORAGE_CLASS_YAML_INVALID: 'errors.storageClassYAMLInvalid',
 	STORAGE_CLASS_CONFLICT: 'errors.storageClassConflict',
 	STORAGE_CLASS_DELETE_FORBIDDEN: 'errors.storageClassDeleteForbidden',

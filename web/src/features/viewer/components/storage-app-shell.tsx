@@ -4,7 +4,7 @@ import type { FileSortState } from '@/features/file-manager/utils/file-tree'
 import type { ViewerFlowSnapshot } from '@/features/viewer/components/viewer-launch-panel'
 import type { DeletePVCState } from '@/features/viewer/components/volume-dialogs'
 import type { ViewerView } from '@/features/viewer/stores/viewer-ui-store'
-import type { PVC, StorageClass, ViewerAPI, ViewerSession, ViewerToken } from '@/features/viewer/types/viewer'
+import type { PVC, ViewerAPI, ViewerSession, ViewerToken } from '@/features/viewer/types/viewer'
 import type { ManualCloseKind, ViewerFlowStatus } from '@/features/viewer/utils/session-capability'
 import { FileBrowserClient } from '@sealos-storage-manager/filebrowser-client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -31,7 +31,6 @@ import {
 	adminCreateStorageClassMutationOptions,
 	adminDeleteStorageClassMutationOptions,
 	adminUpdateStorageClassMutationOptions,
-	adminUpdateStorageClassPolicyMutationOptions,
 	createPVCMutationOptions,
 	deletePVCMutationOptions,
 	expandPVCMutationOptions,
@@ -47,7 +46,7 @@ import {
 import { ErrorCallout } from '@/features/viewer/components/error-callout'
 import { NamespaceFilter } from '@/features/viewer/components/namespace-filter'
 import { StorageClassAdminView } from '@/features/viewer/components/storage-class-admin-view'
-import { DeleteStorageClassDialog, StorageClassDescribeDialog, StorageClassEditorDialog, StorageClassPolicyDialog } from '@/features/viewer/components/storage-class-dialogs'
+import { DeleteStorageClassDialog, StorageClassDescribeDialog, StorageClassEditorDialog } from '@/features/viewer/components/storage-class-dialogs'
 import { SidebarButton } from '@/features/viewer/components/storage-navigation'
 import { ViewerLaunchPanel } from '@/features/viewer/components/viewer-launch-panel'
 import { CreatePVCDialog, DeletePVCDialog, ExpandPVCDialog } from '@/features/viewer/components/volume-dialogs'
@@ -96,7 +95,6 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const [sort, setSort] = useState<FileSortState>({ field: 'name', direction: 'asc' })
 	const [createOpen, setCreateOpen] = useState(false)
 	const [storageClassEditor, setStorageClassEditor] = useState<StorageClassEditorState>(null)
-	const [storageClassPolicyEditor, setStorageClassPolicyEditor] = useState<StorageClass | null>(null)
 	const [describeStorageClassName, setDescribeStorageClassName] = useState<string | null>(null)
 	const [deleteStorageClassName, setDeleteStorageClassName] = useState<string | null>(null)
 	const [expandPVC, setExpandPVC] = useState<PVC | null>(null)
@@ -110,6 +108,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const ownNamespace = adminCapabilitiesQuery.data?.user_namespace || sealosUserNamespace || contextQuery.data?.namespace || ''
 	const canSelectAdminNamespace = adminCapabilitiesQuery.data?.can_manage_pvcs ?? false
 	const canManageStorageClasses = adminCapabilitiesQuery.data?.can_manage_storage_classes ?? false
+	const pvcCreationEnabled = adminCapabilitiesQuery.data?.pvc_creation_enabled ?? true
 	const effectiveNamespace = canSelectAdminNamespace ? (namespace || ownNamespace) : ownNamespace
 	const fileManagementEnabled = adminCapabilitiesQuery.data?.file_management_enabled ?? true
 	const adminNamespacesQuery = useQuery(adminNamespaceListQueryOptions(api, canSelectAdminNamespace))
@@ -155,7 +154,6 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 	const createPVC = useMutation(createPVCMutationOptions(queryClient, api))
 	const createStorageClassMutation = useMutation(adminCreateStorageClassMutationOptions(queryClient, api))
 	const updateStorageClassMutation = useMutation(adminUpdateStorageClassMutationOptions(queryClient, api))
-	const updateStorageClassPolicyMutation = useMutation(adminUpdateStorageClassPolicyMutationOptions(queryClient, api))
 	const deleteStorageClassMutation = useMutation(adminDeleteStorageClassMutationOptions(queryClient, api))
 	const expandPVCMutation = useMutation(expandPVCMutationOptions(queryClient, api))
 	const deletePVC = useMutation(deletePVCMutationOptions(queryClient, api))
@@ -296,7 +294,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 						</Button>
 					)
 				: null}
-			{view === 'volumes'
+			{view === 'volumes' && pvcCreationEnabled
 				? (
 						<Button disabled={!effectiveNamespace} onClick={() => setCreateOpen(true)} type="button">
 							<Plus data-icon="inline-start" />
@@ -409,7 +407,6 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 									onDelete={setDeleteStorageClassName}
 									onDescribe={setDescribeStorageClassName}
 									onEdit={name => setStorageClassEditor({ mode: 'edit', name })}
-									onEditPolicy={setStorageClassPolicyEditor}
 									query={adminStorageClassesQuery}
 								/>
 							</TabsContent>
@@ -422,7 +419,7 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 				namespace={effectiveNamespace}
 				mutation={createPVC}
 				onOpenChange={setCreateOpen}
-				open={createOpen}
+				open={createOpen && pvcCreationEnabled}
 				storageClasses={storageClassesQuery.data ?? []}
 			/>
 			<ExpandPVCDialog
@@ -455,11 +452,6 @@ export function StorageAppShell({ api = viewerApi }: StorageAppShellProps) {
 				api={api}
 				name={describeStorageClassName}
 				onOpenChange={setDescribeStorageClassName}
-			/>
-			<StorageClassPolicyDialog
-				mutation={updateStorageClassPolicyMutation}
-				onOpenChange={setStorageClassPolicyEditor}
-				storageClass={storageClassPolicyEditor}
 			/>
 			<DeleteStorageClassDialog
 				mutation={deleteStorageClassMutation}

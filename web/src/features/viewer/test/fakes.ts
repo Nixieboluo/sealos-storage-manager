@@ -54,8 +54,6 @@ export function adminNamespaceFixture(overrides: Partial<AdminNamespace> = {}): 
 export function storageClassFixture(overrides: Partial<StorageClass> = {}): StorageClass {
 	return {
 		allow_volume_expansion: true,
-		allowed_access_modes: ['ReadWriteOnce'],
-		annotation_status: 'ready',
 		creation_timestamp: '2026-05-14T10:00:00Z',
 		delete_blocked_reason: '',
 		in_use_pvc_count: 0,
@@ -64,7 +62,6 @@ export function storageClassFixture(overrides: Partial<StorageClass> = {}): Stor
 		name: 'standard',
 		provisioner: 'kubernetes.io/no-provisioner',
 		reclaim_policy: 'Delete',
-		visible_in_create: true,
 		volume_binding_mode: 'Immediate',
 		...overrides,
 	}
@@ -162,6 +159,7 @@ export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerA
 			can_manage_pvcs: false,
 			can_manage_storage_classes: false,
 			file_management_enabled: true,
+			pvc_creation_enabled: true,
 			user_namespace: 'ns-admin',
 		}),
 		adminCreateStorageClass: async () => storageClassFixture(),
@@ -173,12 +171,6 @@ export function createFakeViewerAPI(overrides: Partial<ViewerAPI> = {}): ViewerA
 			adminNamespaceFixture({ name: 'kube-system' }),
 		],
 		adminListStorageClasses: async () => [storageClassFixture()],
-		adminUpdateStorageClassPolicy: async (name, input) => storageClassFixture({
-			name,
-			allowed_access_modes: input.allowedAccessModes,
-			visible_in_create: input.visibleInCreate,
-			annotation_status: input.visibleInCreate ? 'ready' : 'hidden',
-		}),
 		adminUpdateStorageClass: async name => storageClassFixture({ name }),
 		closePodSession: async () => podSessionFixture({ status: 'terminated' }),
 		closeViewerSession: async id => viewerSessionFixture({ id, status: 'closed' }),

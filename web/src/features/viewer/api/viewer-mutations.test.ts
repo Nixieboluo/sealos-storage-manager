@@ -5,7 +5,6 @@ import {
 	adminCreateStorageClassMutationOptions,
 	adminDeleteStorageClassMutationOptions,
 	adminUpdateStorageClassMutationOptions,
-	adminUpdateStorageClassPolicyMutationOptions,
 	closePodSessionMutationOptions,
 	closeViewerSessionMutationOptions,
 	createPVCMutationOptions,
@@ -128,16 +127,6 @@ describe('viewer mutation options', () => {
 		)
 		expect(queryClient.getQueryData(viewerKeys.adminStorageClasses())).toEqual(expect.arrayContaining([
 			expect.objectContaining({ name: 'standard', provisioner: 'updated' }),
-		]))
-
-		adminUpdateStorageClassPolicyMutationOptions(queryClient, createFakeViewerAPI()).onSuccess?.(
-			{ name: 'shared', allowed_access_modes: ['ReadWriteMany'], visible_in_create: true } as never,
-			{ name: 'shared', allowedAccessModes: ['ReadWriteMany'], visibleInCreate: true },
-			undefined,
-			mutationContext,
-		)
-		expect(queryClient.getQueryData(viewerKeys.adminStorageClasses())).toEqual(expect.arrayContaining([
-			expect.objectContaining({ name: 'shared', allowed_access_modes: ['ReadWriteMany'] }),
 		]))
 
 		adminDeleteStorageClassMutationOptions(queryClient, createFakeViewerAPI()).onSuccess?.(

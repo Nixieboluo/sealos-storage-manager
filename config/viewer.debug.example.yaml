@@ -75,6 +75,8 @@ viewer:
     login_url_mode: public
   file_management:
     enabled: true
+  pvc_creation:
+    enabled: true
   pod:
     service_account_name: ""
     mount_path: /srv

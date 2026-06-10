@@ -39,6 +39,7 @@ type ViewerConfig struct {
 	HookClientToken  string               `yaml:"hook_client_token"`
 	HookScript       string               `yaml:"hook_script"`
 	FileManagement   FileManagementConfig `yaml:"file_management"`
+	PVCCreation      PVCCreationConfig    `yaml:"pvc_creation"`
 	FileBrowser      FileBrowserConfig    `yaml:"filebrowser"`
 	Pod              PodConfig            `yaml:"pod"`
 	Service          ServiceConfig        `yaml:"service"`
@@ -49,8 +50,13 @@ type FileManagementConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+type PVCCreationConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type FeatureConfig struct {
 	FileManagement FileManagementConfig
+	PVCCreation    PVCCreationConfig
 }
 
 type FileBrowserConfig struct {
@@ -176,6 +182,9 @@ func Default() Config {
 		},
 		Viewer: ViewerConfig{
 			FileManagement: FileManagementConfig{
+				Enabled: true,
+			},
+			PVCCreation: PVCCreationConfig{
 				Enabled: true,
 			},
 			FileBrowser: FileBrowserConfig{
@@ -352,6 +361,7 @@ func (cfg Config) Validate() error {
 func (cfg Config) Features() FeatureConfig {
 	return FeatureConfig{
 		FileManagement: cfg.Viewer.FileManagement,
+		PVCCreation:    cfg.Viewer.PVCCreation,
 	}
 }
 
@@ -368,6 +378,7 @@ func (cfg Config) Redacted() map[string]any {
 			"hook_client_token":  "redacted",
 			"hook_script":        "redacted",
 			"file_management":    cfg.Viewer.FileManagement,
+			"pvc_creation":       cfg.Viewer.PVCCreation,
 			"filebrowser":        cfg.Viewer.FileBrowser,
 			"pod":                cfg.Viewer.Pod,
 			"service":            cfg.Viewer.Service,

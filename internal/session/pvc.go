@@ -134,25 +134,12 @@ func (s *ViewerService) CreatePVC(ctx context.Context, input CreatePVCInput) (pv
 	if storageClassName == "" {
 		return nil, apienv.NewError(400, apienv.CodeValidationError, "storage_class_name is required", nil)
 	}
-	storageClass, err := s.kube.GetStorageClass(ctx, storageClassName)
+	_, err = s.kube.GetStorageClass(ctx, storageClassName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, apienv.NewError(404, apienv.CodeStorageClassNotFound, "StorageClass not found", nil)
 		}
 		return nil, err
-	}
-	allowedModes, annotationStatus := StorageClassAccessPolicy(storageClass.Annotations)
-	if annotationStatus != storageClassAnnotationReady {
-		return nil, apienv.NewError(403, apienv.CodeStorageClassNotVisible, "StorageClass is not available for PVC creation", map[string]any{
-			"annotation_status": annotationStatus,
-		})
-	}
-	for _, mode := range input.AccessModes {
-		if !slices.Contains(allowedModes, strings.TrimSpace(mode)) {
-			return nil, apienv.NewError(400, apienv.CodeUnsupportedAccessMode, "Access mode is not allowed by the selected StorageClass", map[string]any{
-				"allowed_access_modes": allowedModes,
-			})
-		}
 	}
 	pvcSpec.Spec.StorageClassName = &storageClassName
 	created, err := s.kube.CreatePVC(ctx, pvcSpec)
