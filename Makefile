@@ -11,6 +11,7 @@ ENCORE_GO ?= $(ENCORE_GO_ROOT)/bin/go
 ENCORE_ENV := ENCORE_GOROOT="$(ENCORE_GO_ROOT)" PATH="$(GO_BIN_DIR):$(PATH)"
 PNPM ?= pnpm
 HELM ?= helm
+CHART_DIR ?= deploy/charts/sealos-storage-manager
 CONFIG ?= config/viewer.debug.yaml
 INTEGRATION_CONFIG ?= config/viewer.integration.yaml
 IMAGE ?= sealos-storage-manager-viewer:dev
@@ -141,14 +142,14 @@ web-build-image:
 	docker buildx build --platform $(PLATFORMS) -f $(WEB_DIR)/Dockerfile -t $(IMAGE_PREFIX)-web:$(TAG) --load $(WEB_DIR)
 
 chart-lint:
-	$(HELM) lint deploy
+	$(HELM) lint $(CHART_DIR)
 
 chart-template:
-	$(HELM) template sealos-storage-manager deploy --namespace sealos-storage-manager >/dev/null
+	$(HELM) template sealos-storage-manager $(CHART_DIR) --namespace sealos-storage-manager >/dev/null
 
 chart-package:
 	mkdir -p dist/charts
-	$(HELM) package deploy --destination dist/charts
+	$(HELM) package $(CHART_DIR) --destination dist/charts
 
 deploy-verify: chart-lint chart-template chart-package
 

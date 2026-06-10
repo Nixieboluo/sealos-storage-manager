@@ -452,12 +452,21 @@ func TestDeployChartValuesEmbedValidViewerConfig(t *testing.T) {
 	}
 }
 
+func TestDeployChartHasPackagedAppValues(t *testing.T) {
+	t.Parallel()
+
+	valuesPath := filepath.Join(repoRoot(t), "deploy", "charts", "sealos-storage-manager", "sealos-storage-manager-values.yaml")
+	if _, err := os.Stat(valuesPath); err != nil {
+		t.Fatalf("packaged app values missing: %v", err)
+	}
+}
+
 func TestDeployChartDerivesPublicHostsFromCloudDomain(t *testing.T) {
 	t.Parallel()
 
 	viewerYAML := deployViewerYAML(t,
-		"--set", "global.cloudDomain=cloud.sealos.test",
-		"--set", "global.cloudPort=7443",
+		"--set", "cloudDomain=cloud.sealos.test",
+		"--set", "cloudPort=7443",
 		"--set", "web.publicHost=storage.cloud.sealos.test",
 		"--set", "backend.config.viewer.ingress.hostPrefix=pvc-viewer",
 	)
@@ -476,9 +485,9 @@ func TestDeployChartEnablesViewerIngressTLSForHTTPS(t *testing.T) {
 	t.Parallel()
 
 	viewerYAML := deployViewerYAML(t,
-		"--set", "global.cloudDomain=192.168.12.38.nip.io",
-		"--set", "global.cloudPort=443",
-		"--set", "global.certSecretName=wildcard-cert",
+		"--set", "cloudDomain=192.168.12.38.nip.io",
+		"--set", "cloudPort=443",
+		"--set", "certSecretName=wildcard-cert",
 	)
 	if !strings.Contains(viewerYAML, `public_scheme: "https"`) {
 		t.Fatalf("viewer.yaml missing https public scheme:\n%s", viewerYAML)
@@ -492,14 +501,30 @@ func TestDeployChartLeavesViewerIngressTLSDisabledForHTTP(t *testing.T) {
 	t.Parallel()
 
 	viewerYAML := deployViewerYAML(t,
-		"--set", "global.disableHttps=true",
-		"--set", "global.certSecretName=wildcard-cert",
+		"--set", "disableHttps=true",
+		"--set", "certSecretName=wildcard-cert",
 	)
 	if !strings.Contains(viewerYAML, `public_scheme: "http"`) {
 		t.Fatalf("viewer.yaml missing http public scheme:\n%s", viewerYAML)
 	}
 	if !strings.Contains(viewerYAML, `tls_secret_name: ""`) {
 		t.Fatalf("viewer.yaml should not configure viewer ingress TLS for HTTP:\n%s", viewerYAML)
+	}
+}
+
+func TestDeployChartRendersHTTPDesktopAppWithoutIngressTLS(t *testing.T) {
+	t.Parallel()
+
+	data := string(renderDeployChartWithArgs(t,
+		"--set", "disableHttps=true",
+		"--set", "cloudDomain=cloud.sealos.test",
+		"--set", "desktopApp.create=true",
+	))
+	if !strings.Contains(data, `url: "http://storage-manager.cloud.sealos.test"`) {
+		t.Fatalf("desktop app URL should use HTTP mode:\n%s", data)
+	}
+	if strings.Contains(data, "\ntls:\n") {
+		t.Fatalf("HTTP mode should not render ingress TLS:\n%s", data)
 	}
 }
 
@@ -608,7 +633,8 @@ func renderDeployChartWithArgs(t *testing.T, args ...string) []byte {
 	}
 	root := repoRoot(t)
 	helmArgs := make([]string, 0, 5+len(args))
-	helmArgs = append(helmArgs, "template", "sealos-storage-manager", filepath.Join(root, "deploy"), "--namespace", "sealos-storage-manager")
+	chartDir := filepath.Join(root, "deploy", "charts", "sealos-storage-manager")
+	helmArgs = append(helmArgs, "template", "sealos-storage-manager", chartDir, "--namespace", "sealos-storage-manager")
 	helmArgs = append(helmArgs, args...)
 	cmd := exec.Command("helm", helmArgs...) //nolint:gosec // Test renders committed chart path.
 	output, err := cmd.CombinedOutput()

@@ -58,14 +58,14 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "sealos-storage-manager.scheme" -}}
-{{- if eq (toString .Values.global.disableHttps) "true" -}}http{{- else -}}https{{- end -}}
+{{- if eq (toString .Values.disableHttps) "true" -}}http{{- else -}}https{{- end -}}
 {{- end -}}
 
 {{- define "sealos-storage-manager.publicPort" -}}
 {{- $scheme := include "sealos-storage-manager.scheme" . -}}
-{{- $port := toString .Values.global.cloudPort -}}
+{{- $port := toString .Values.cloudPort -}}
 {{- if eq $scheme "http" -}}
-{{- $port = toString .Values.global.httpPort -}}
+{{- $port = toString .Values.httpPort -}}
 {{- end -}}
 {{- if or (and (eq $scheme "https") (or (eq $port "") (eq $port "443"))) (and (eq $scheme "http") (or (eq $port "") (eq $port "80"))) -}}
 {{- "" -}}
@@ -80,7 +80,7 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "sealos-storage-manager.webHost" -}}
-{{- default (printf "storage-manager.%s" .Values.global.cloudDomain) .Values.web.publicHost -}}
+{{- default (printf "storage-manager.%s" .Values.cloudDomain) .Values.web.publicHost -}}
 {{- end -}}
 
 {{- define "sealos-storage-manager.webOrigin" -}}
@@ -88,14 +88,14 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "sealos-storage-manager.viewerHostTemplate" -}}
-{{- printf "%s-{{ .PodSessionID }}.%s" .Values.backend.config.viewer.ingress.hostPrefix .Values.global.cloudDomain -}}
+{{- printf "%s-{{ .PodSessionID }}.%s" .Values.backend.config.viewer.ingress.hostPrefix .Values.cloudDomain -}}
 {{- end -}}
 
 {{- define "sealos-storage-manager.viewerTLSSecretName" -}}
 {{- if .Values.backend.config.viewer.ingress.tlsSecretName -}}
 {{- .Values.backend.config.viewer.ingress.tlsSecretName -}}
-{{- else if not (eq (toString .Values.global.disableHttps) "true") -}}
-{{- .Values.global.certSecretName -}}
+{{- else if not (eq (toString .Values.disableHttps) "true") -}}
+{{- .Values.certSecretName -}}
 {{- end -}}
 {{- end -}}
 

@@ -204,8 +204,8 @@ make build-image IMAGE=registry.example.com/viewer-backend:dev
 
 ## Helm Deployment
 
-`deploy/` is the Helm chart for self-hosted deployment. Validate it before
-shipping changes:
+`deploy/charts/sealos-storage-manager/` is the Helm chart for self-hosted
+deployment. Validate it before shipping changes:
 
 ```sh
 make deploy-verify
@@ -214,20 +214,21 @@ make deploy-verify
 Install or upgrade the chart:
 
 ```sh
-helm upgrade --install sealos-storage-manager deploy \
+helm upgrade --install sealos-storage-manager deploy/charts/sealos-storage-manager \
   --namespace sealos-storage-manager \
   --create-namespace \
-  --set global.cloudDomain=cloud.example.org \
+  --set cloudDomain=cloud.example.org \
   --set backend.image.repository=ghcr.io/owner/sealos-storage-manager-backend \
   --set backend.image.tag=dev \
   --set web.image.repository=ghcr.io/owner/sealos-storage-manager-web \
   --set web.image.tag=dev
 ```
 
-Set `global.cloudDomain` from the cluster public domain. In Sealos-managed
-installs this is the same value exposed as `cloudDomain` in
-`sealos-system/sealos-config`. Optional `global.cloudPort`, `global.httpPort`,
-and `global.disableHttps` values control generated public URLs.
+Set `cloudDomain` from the cluster public domain. In Sealos-managed installs,
+the deploy entrypoint reads it from
+`/root/.sealos/cloud/values/global.yaml` at `global.http.domain`, falling back
+to `cloudDomain` in `sealos-system/sealos-config`. Optional `cloudPort`,
+`httpPort`, and `disableHttps` values control generated public URLs.
 
 The chart derives:
 
@@ -247,3 +248,27 @@ unprefixed routes, and proxies `/metrics` plus
 Override frontend runtime settings through `web.runtimeConfig` values. The
 default `apiBaseUrl` is `/api`, which keeps browser API requests on the same
 origin as the web app and lets the frontend service own the public rewrite.
+
+## Sealos Cluster Image
+
+`deploy/` is also the Sealos cluster image build context. It contains:
+
+- `Kubefile`, which packages cached runtime images, charts, and the install
+  entrypoint.
+- `entrypoint.sh`, which sources `/root/.sealos/cloud/scripts/tools.sh`, reads
+  global HTTP/TLS settings, loads packaged values plus all
+  `/root/.sealos/cloud/values/apps/sealos-storage-manager/*-values.yaml`
+  overrides, and runs `helm upgrade -i`.
+- `charts/sealos-storage-manager/sealos-storage-manager-values.yaml`, the
+  packaged defaults used by Sealos app installs.
+
+The `images` workflow publishes:
+
+- `ghcr.io/<owner>/<repo>/<repo>:<tag>` for the backend runtime
+- `ghcr.io/<owner>/<repo>/<repo>-web:<tag>` for the web runtime
+- `ghcr.io/<owner>/<repo>/<repo>-cluster:<tag>` for the Sealos cluster image
+
+For each cluster image build, the workflow caches runtime images with
+`sealos registry save --registry-dir=registry_<arch> --arch <arch> .`, saves
+`sealos-storage-manager-cluster-<tag>-<arch>.tar.gz`, generates an md5 file,
+and uploads both artifacts to OSS.

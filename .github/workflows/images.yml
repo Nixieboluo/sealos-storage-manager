@@ -1,148 +1,519 @@
 name: images
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+    push:
+        branches: [main]
+        tags: ['v*']
+    workflow_dispatch:
+        inputs:
+            version:
+                description: 'Build version, supports sha-* or v*; empty uses current ref.'
+                required: false
+                type: string
 
 permissions:
-  contents: read
-  packages: write
-  security-events: write
+    contents: read
+    packages: write
+    security-events: write
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    GHCR_BACKEND_RUNTIME_IMAGE: ghcr.io/${{ github.repository }}/${{ github.event.repository.name }}-backend
+    GHCR_WEB_RUNTIME_IMAGE: ghcr.io/${{ github.repository }}/${{ github.event.repository.name }}-web
+    GHCR_SEALOS_IMAGE: ghcr.io/${{ github.repository }}/${{ github.event.repository.name }}-cluster
+
+concurrency:
+    group: images-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
+    meta:
+        name: Release metadata
+        runs-on: namespace-profile-sealos-apps-amd64
+        outputs:
+            image_tag: ${{ steps.meta.outputs.image_tag }}
+            is_release: ${{ steps.meta.outputs.is_release }}
+            oss_prefix: ${{ steps.meta.outputs.oss_prefix }}
+            oss_tag: ${{ steps.meta.outputs.oss_tag }}
+        steps:
+            - name: Compute tags
+              id: meta
+              shell: bash
+              run: |
+                  set -euo pipefail
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: .go-version
-          cache: true
+                  RAW_VERSION="${{ github.event.inputs.version || '' }}"
+                  if [[ -z "$(echo "${RAW_VERSION}" | xargs)" ]]; then
+                    if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+                      RAW_VERSION="${GITHUB_REF_NAME}"
+                    else
+                      RAW_VERSION="sha-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+                    fi
+                  fi
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+                  IMAGE_TAG="$(echo "${RAW_VERSION}" | xargs)"
+                  if [[ "${IMAGE_TAG}" != sha-* && "${IMAGE_TAG}" != v* ]]; then
+                    echo "unsupported version input: ${IMAGE_TAG}. expected sha-* or v*." >&2
+                    exit 1
+                  fi
 
-      - name: Enable PNPM
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.12.3 --activate
+                  if [[ "${IMAGE_TAG}" == sha-* ]]; then
+                    INPUT_SHA="${IMAGE_TAG#sha-}"
+                    if [[ -z "${INPUT_SHA}" ]]; then
+                      echo "invalid sha version input: ${IMAGE_TAG}" >&2
+                      exit 1
+                    fi
+                    IS_RELEASE="false"
+                    OSS_TAG="main-${INPUT_SHA}"
+                    OSS_PREFIX="ci/main/${INPUT_SHA}"
+                  else
+                    IS_RELEASE="true"
+                    OSS_TAG="${IMAGE_TAG}"
+                    OSS_PREFIX="release/${IMAGE_TAG}"
+                  fi
 
-      - name: Configure PNPM cache
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
+                  echo "image_tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+                  echo "is_release=${IS_RELEASE}" >> "${GITHUB_OUTPUT}"
+                  echo "oss_prefix=${OSS_PREFIX}" >> "${GITHUB_OUTPUT}"
+                  echo "oss_tag=${OSS_TAG}" >> "${GITHUB_OUTPUT}"
 
-      - name: Install Encore
-        run: |
-          curl -L https://encore.dev/install.sh | bash -s -- "$(cat .encore-version)"
-          echo "$HOME/.encore/bin" >> "$GITHUB_PATH"
+    verify:
+        name: Verify source
+        runs-on: namespace-profile-sealos-apps-amd64
+        steps:
+            - uses: actions/checkout@v5
 
-      - name: Install Helm
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: .go-version
+                  cache: true
 
-      - name: Check tool versions
-        run: make check-go-version
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
 
-      - name: Install web dependencies
-        run: make web-install
+            - name: Enable PNPM
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.12.3 --activate
 
-      - name: Verify source
-        run: make verify
+            - name: Configure PNPM cache
+              uses: actions/cache@v5
+              with:
+                  path: ~/.local/share/pnpm/store
+                  key: ${{ runner.os }}-pnpm-${{ hashFiles('web/pnpm-lock.yaml') }}
+                  restore-keys: |
+                      ${{ runner.os }}-pnpm-
 
-      - name: Verify deploy chart
-        run: make deploy-verify
+            - name: Install Encore
+              run: |
+                  curl -L https://encore.dev/install.sh | bash -s -- "$(cat .encore-version)"
+                  echo "$HOME/.encore/bin" >> "$GITHUB_PATH"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+            - name: Install Helm
+              run: |
+                  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+            - name: Check tool versions
+              run: make check-go-version
 
-      - name: Compute image tags
-        id: meta
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          repo="$(basename "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          image_prefix="${owner}/${repo}"
-          short_sha="${GITHUB_SHA::12}"
+            - name: Install web dependencies
+              run: make web-install
 
-          tags=("sha-${short_sha}")
-          if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "main" ]]; then
-            tags+=("main")
-          fi
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-            tags+=("${version}")
-            IFS='.' read -r major minor patch <<< "${version}"
-            if [[ -n "${major:-}" && -n "${minor:-}" ]]; then
-              tags+=("${major}.${minor}")
-            fi
-            if [[ -n "${major:-}" ]]; then
-              tags+=("${major}")
-            fi
-          fi
+            - name: Verify source
+              run: make verify
 
-          {
-            echo "image_prefix=${image_prefix}"
-            echo "short_sha=${short_sha}"
-            echo "tags<<EOF"
-            printf '%s\n' "${tags[@]}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+            - name: Verify deploy chart
+              run: make deploy-verify
 
-      - name: Build and push images
-        shell: bash
-        run: |
-          set -euo pipefail
-          tags="$(tr '\n' ' ' <<< "${{ steps.meta.outputs.tags }}")"
-          make push-images \
-            REGISTRY=ghcr.io \
-            IMAGE_PREFIX="${{ steps.meta.outputs.image_prefix }}" \
-            TAGS="$tags" \
-            PLATFORMS=linux/amd64
+    backend-runtime-build:
+        name: Build backend runtime image (${{ matrix.arch }})
+        runs-on: ${{ matrix.runner }}
+        needs: [meta, verify]
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      platform: linux/amd64
+                      runner: namespace-profile-sealos-apps-amd64
+                    - arch: arm64
+                      platform: linux/arm64
+                      runner: namespace-profile-sealos-apps-arm64
+        steps:
+            - uses: actions/checkout@v5
 
-      - name: Scan backend image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ghcr.io/${{ steps.meta.outputs.image_prefix }}-backend:sha-${{ steps.meta.outputs.short_sha }}
-          format: sarif
-          output: trivy-backend.sarif
-          severity: CRITICAL,HIGH
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: .go-version
+                  cache: true
 
-      - name: Upload backend scan
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-backend.sarif
-          category: trivy-backend
+            - name: Install Encore
+              run: |
+                  curl -L https://encore.dev/install.sh | bash -s -- "$(cat .encore-version)"
+                  echo "$HOME/.encore/bin" >> "$GITHUB_PATH"
 
-      - name: Scan web image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ghcr.io/${{ steps.meta.outputs.image_prefix }}-web:sha-${{ steps.meta.outputs.short_sha }}
-          format: sarif
-          output: trivy-web.sarif
-          severity: CRITICAL,HIGH
+            - name: Check tool versions
+              run: make check-go-version
 
-      - name: Upload web scan
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: trivy-web.sarif
-          category: trivy-web
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push backend runtime image
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  IMAGE="${GHCR_BACKEND_RUNTIME_IMAGE}:${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}"
+                  encore build docker --config=infra-config.json --arch=${{ matrix.arch }} "${IMAGE}"
+                  docker push "${IMAGE}"
+                  docker image inspect "${IMAGE}" --format 'backend image size={{.Size}}'
+
+    backend-runtime-manifest:
+        name: Publish backend runtime manifest
+        runs-on: namespace-profile-sealos-apps-amd64
+        needs: [meta, backend-runtime-build]
+        steps:
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create multi-arch manifest
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}" \
+                    "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}-arm64"
+                  docker buildx imagetools inspect "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}"
+
+            - name: Update latest tag
+              if: ${{ needs.meta.outputs.is_release == 'true' }}
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_BACKEND_RUNTIME_IMAGE}:latest" \
+                    "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}-arm64"
+
+    web-runtime-build:
+        name: Build web runtime image (${{ matrix.arch }})
+        runs-on: ${{ matrix.runner }}
+        needs: [meta, verify]
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      platform: linux/amd64
+                      runner: namespace-profile-sealos-apps-amd64
+                    - arch: arm64
+                      platform: linux/arm64
+                      runner: namespace-profile-sealos-apps-arm64
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: .go-version
+                  cache: true
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+
+            - name: Enable PNPM
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.12.3 --activate
+
+            - name: Install Encore
+              run: |
+                  curl -L https://encore.dev/install.sh | bash -s -- "$(cat .encore-version)"
+                  echo "$HOME/.encore/bin" >> "$GITHUB_PATH"
+
+            - name: Generate Encore web client
+              run: make web-generate-api
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push web runtime image
+              uses: docker/build-push-action@v6
+              with:
+                  context: ./web
+                  file: ./web/Dockerfile
+                  push: true
+                  cache-from: type=gha,scope=web-runtime-${{ matrix.arch }}
+                  cache-to: type=gha,mode=max,scope=web-runtime-${{ matrix.arch }}
+                  platforms: ${{ matrix.platform }}
+                  tags: |
+                      ${{ env.GHCR_WEB_RUNTIME_IMAGE }}:${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}
+                  labels: |
+                      org.opencontainers.image.source=https://github.com/${{ github.repository }}
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ needs.meta.outputs.image_tag }}
+                      org.opencontainers.image.architecture=${{ matrix.arch }}
+                      runnumber=${{ github.run_id }}
+
+    web-runtime-manifest:
+        name: Publish web runtime manifest
+        runs-on: namespace-profile-sealos-apps-amd64
+        needs: [meta, web-runtime-build]
+        steps:
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create multi-arch manifest
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}" \
+                    "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}-arm64"
+                  docker buildx imagetools inspect "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}"
+
+            - name: Update latest tag
+              if: ${{ needs.meta.outputs.is_release == 'true' }}
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_WEB_RUNTIME_IMAGE}:latest" \
+                    "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}-arm64"
+
+    scan-runtime-images:
+        name: Scan runtime images
+        runs-on: namespace-profile-sealos-apps-amd64
+        needs: [meta, backend-runtime-manifest, web-runtime-manifest]
+        steps:
+            - name: Scan backend image
+              uses: aquasecurity/trivy-action@v0.36.0
+              with:
+                  image-ref: ${{ env.GHCR_BACKEND_RUNTIME_IMAGE }}:${{ needs.meta.outputs.image_tag }}
+                  format: sarif
+                  output: trivy-backend.sarif
+                  severity: CRITICAL,HIGH
+
+            - name: Upload backend scan
+              uses: github/codeql-action/upload-sarif@v4
+              if: always()
+              with:
+                  sarif_file: trivy-backend.sarif
+                  category: trivy-backend
+
+            - name: Scan web image
+              uses: aquasecurity/trivy-action@v0.36.0
+              with:
+                  image-ref: ${{ env.GHCR_WEB_RUNTIME_IMAGE }}:${{ needs.meta.outputs.image_tag }}
+                  format: sarif
+                  output: trivy-web.sarif
+                  severity: CRITICAL,HIGH
+
+            - name: Upload web scan
+              uses: github/codeql-action/upload-sarif@v4
+              if: always()
+              with:
+                  sarif_file: trivy-web.sarif
+                  category: trivy-web
+
+    sealos-build:
+        name: Build Sealos image (${{ matrix.arch }})
+        runs-on: ${{ matrix.runner }}
+        needs: [meta, backend-runtime-manifest, web-runtime-manifest]
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      platform: linux/amd64
+                      runner: namespace-profile-sealos-apps-amd64
+                    - arch: arm64
+                      platform: linux/arm64
+                      runner: namespace-profile-sealos-apps-arm64
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Install Sealos
+              run: sudo bash ./.github/scripts/install.sh
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Cache images for Sealos
+              working-directory: deploy
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  BACKEND_IMAGE="${GHCR_BACKEND_RUNTIME_IMAGE}:${IMAGE_TAG}"
+                  WEB_IMAGE="${GHCR_WEB_RUNTIME_IMAGE}:${IMAGE_TAG}"
+                  VALUES_FILES=(
+                    "charts/sealos-storage-manager/values.yaml"
+                    "charts/sealos-storage-manager/sealos-storage-manager-values.yaml"
+                  )
+
+                  sudo sealos login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+                  for values_file in "${VALUES_FILES[@]}"; do
+                    sed -i -E "/^backend:/,/^web:/ s#^([[:space:]]*repository:[[:space:]]*).*#\\1${GHCR_BACKEND_RUNTIME_IMAGE}#" "${values_file}"
+                    sed -i -E "/^backend:/,/^web:/ s#^([[:space:]]*tag:[[:space:]]*).*#\\1${IMAGE_TAG}#" "${values_file}"
+                    sed -i -E "/^web:/,/^storageClassAdmin:/ s#^([[:space:]]*repository:[[:space:]]*).*#\\1${GHCR_WEB_RUNTIME_IMAGE}#" "${values_file}"
+                    sed -i -E "/^web:/,/^storageClassAdmin:/ s#^([[:space:]]*tag:[[:space:]]*).*#\\1${IMAGE_TAG}#" "${values_file}"
+                  done
+                  echo "Caching runtime images: ${BACKEND_IMAGE}, ${WEB_IMAGE}"
+                  sudo sealos registry save --registry-dir=registry_${{ matrix.arch }} --arch ${{ matrix.arch }} .
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build and push Sealos image
+              uses: docker/build-push-action@v6
+              with:
+                  context: ./deploy
+                  file: ./deploy/Kubefile
+                  push: true
+                  cache-from: type=gha,scope=sealos-${{ matrix.arch }}
+                  cache-to: type=gha,mode=max,scope=sealos-${{ matrix.arch }}
+                  platforms: ${{ matrix.platform }}
+                  tags: |
+                      ${{ env.GHCR_SEALOS_IMAGE }}:${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}
+                  labels: |
+                      org.opencontainers.image.source=https://github.com/${{ github.repository }}
+                      org.opencontainers.image.revision=${{ github.sha }}
+                      org.opencontainers.image.version=${{ needs.meta.outputs.image_tag }}
+                      org.opencontainers.image.architecture=${{ matrix.arch }}
+                      runnumber=${{ github.run_id }}
+
+            - name: Save Sealos image package
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  TAR_NAME="storage-manager-cluster-${IMAGE_TAG}-${{ matrix.arch }}.tar.gz"
+                  docker pull "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-${{ matrix.arch }}"
+                  mkdir -p release
+                  docker save "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-${{ matrix.arch }}" | gzip > "release/${TAR_NAME}"
+                  ls -lh "release/${TAR_NAME}"
+
+            - name: Upload Sealos image package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: sealos-image-${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}
+                  path: release/storage-manager-cluster-${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}.tar.gz
+                  if-no-files-found: error
+                  retention-days: 14
+
+    sealos-manifest:
+        name: Publish Sealos manifest
+        runs-on: namespace-profile-sealos-apps-amd64
+        needs: [meta, sealos-build]
+        steps:
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create multi-arch manifest
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}" \
+                    "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-arm64"
+                  docker buildx imagetools inspect "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}"
+
+            - name: Update latest tag
+              if: ${{ needs.meta.outputs.is_release == 'true' }}
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ needs.meta.outputs.image_tag }}"
+                  docker buildx imagetools create \
+                    -t "${GHCR_SEALOS_IMAGE}:latest" \
+                    "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-amd64" \
+                    "${GHCR_SEALOS_IMAGE}:${IMAGE_TAG}-arm64"
+
+    sync-image-aliyun:
+        name: Sync Sealos packages to OSS (${{ matrix.arch }})
+        runs-on: namespace-profile-sealos-apps-amd64
+        needs: [meta, sealos-manifest]
+        strategy:
+            fail-fast: false
+            matrix:
+                arch: [amd64, arm64]
+        steps:
+            - name: Download Sealos package
+              uses: actions/download-artifact@v4
+              with:
+                  path: release
+                  pattern: sealos-image-${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}
+                  merge-multiple: true
+
+            - name: Install OSS tools
+              run: |
+                  set -euo pipefail
+                  sudo -v
+                  curl -fsSL https://gosspublic.alicdn.com/ossutil/install.sh | sudo bash
+
+            - name: Sync to OSS
+              env:
+                  OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+                  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+                  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+                  OSS_BUCKET: ${{ vars.OSS_BUCKET }}
+              run: |
+                  set -euo pipefail
+                  : "${OSS_ENDPOINT:?OSS_ENDPOINT is required}"
+                  : "${OSS_ACCESS_KEY_ID:?OSS_ACCESS_KEY_ID is required}"
+                  : "${OSS_ACCESS_KEY_SECRET:?OSS_ACCESS_KEY_SECRET is required}"
+                  : "${OSS_BUCKET:?OSS_BUCKET is required}"
+
+                  TAR_NAME="release/storage-manager-cluster-${{ needs.meta.outputs.image_tag }}-${{ matrix.arch }}.tar.gz"
+                  OSS_PREFIX="${{ needs.meta.outputs.oss_prefix }}"
+                  OSS_TAR_NAME="storage-manager-cluster-${{ needs.meta.outputs.oss_tag }}-${{ matrix.arch }}.tar.gz"
+
+                  md5sum "${TAR_NAME}" > "${TAR_NAME}.md5"
+                  ossutil64 cp -f -e "${OSS_ENDPOINT}" \
+                    -i "${OSS_ACCESS_KEY_ID}" \
+                    -k "${OSS_ACCESS_KEY_SECRET}" \
+                    "${TAR_NAME}" \
+                    "oss://${OSS_BUCKET}/${OSS_PREFIX}/${OSS_TAR_NAME}"
+                  ossutil64 cp -f -e "${OSS_ENDPOINT}" \
+                    -i "${OSS_ACCESS_KEY_ID}" \
+                    -k "${OSS_ACCESS_KEY_SECRET}" \
+                    "${TAR_NAME}.md5" \
+                    "oss://${OSS_BUCKET}/${OSS_PREFIX}/${OSS_TAR_NAME}.md5"

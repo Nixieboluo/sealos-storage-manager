@@ -62,7 +62,7 @@ jobs:
       - name: Verify backend
         run: make backend-verify
 
-      - name: Verify frontend
+      - name: Verify web
         run: make web-verify
 
       - name: Lint backend
@@ -70,7 +70,7 @@ jobs:
         with:
           version: v2.12.2
 
-      - name: Lint frontend
+      - name: Lint web
         run: make web-lint
 
       - name: Verify deploy chart

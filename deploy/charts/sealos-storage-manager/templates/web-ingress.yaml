@@ -27,10 +27,10 @@ spec:
                 name: {{ .Values.web.service.name | quote }}
                 port:
                   number: {{ .Values.web.service.port }}
-  {{- if and .Values.web.ingress.tls.enabled (not (eq (toString .Values.global.disableHttps) "true")) }}
+  {{- if and .Values.web.ingress.tls.enabled (not (eq (toString .Values.disableHttps) "true")) }}
   tls:
     - hosts:
         - {{ include "sealos-storage-manager.webHost" . | quote }}
-      secretName: {{ default .Values.global.certSecretName .Values.web.ingress.tls.secretName | quote }}
+      secretName: {{ default .Values.certSecretName .Values.web.ingress.tls.secretName | quote }}
   {{- end }}
 {{- end }}
