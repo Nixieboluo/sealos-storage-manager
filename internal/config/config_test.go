@@ -514,7 +514,7 @@ func TestDeployChartValuesEmbedValidViewerConfig(t *testing.T) {
 	if !strings.Contains(viewerYAML, "pvc_creation:\n    enabled: true") {
 		t.Fatalf("viewer.yaml missing pvc_creation feature gate:\n%s", viewerYAML)
 	}
-	if !strings.Contains(viewerYAML, "pvc_metrics:\n    enabled: false\n    prometheus_base_url: \"\"\n    query_timeout: \"3s\"") {
+	if !strings.Contains(viewerYAML, "pvc_metrics:\n    enabled: true\n    prometheus_base_url: \"http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus\"\n    query_timeout: \"3s\"") {
 		t.Fatalf("viewer.yaml missing pvc_metrics configuration:\n%s", viewerYAML)
 	}
 	for _, forbidden := range []string{

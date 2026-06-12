@@ -1,44 +1,15 @@
-nameOverride: ""
-fullnameOverride: ""
-
-namespace:
-  create: true
-  name: storage-manager
-
-rbac:
-  create: true
+# User-overridable values for the Sealos Storage Manager install package.
 
 backend:
   replicaCount: 1
-  image:
-    repository: ghcr.io/OWNER/REPO-backend
-    tag: latest
-    pullPolicy: IfNotPresent
-  serviceAccount:
-    create: true
-    name: viewer-backend
-  service:
-    name: viewer-backend
-    type: ClusterIP
-    port: 80
-    targetPort: http
-  containerPort: 8080
-  configMapName: viewer-backend-config
-  configMountPath: /app/config
   config:
     admin:
       allowedUserIds:
         - admin
-      storageClassServiceAccountName: storageclass-admin
     viewer:
       backendVerifyUrl: ""
       hookClientToken: replace-me
       filebrowser:
-        image: filebrowser/filebrowser:v2.30.0
-        binaryPath: /filebrowser
-        port: 8080
-        tokenTtl: 15m
-        loginTimeout: 2s
         loginUrlMode: internal
       fileManagement:
         enabled: true
@@ -47,92 +18,30 @@ backend:
       storageQuota:
         enabled: true
         accountBaseUrl: "http://account-service.account-system.svc:2333"
-        queryTimeout: 3s
-        systemQuota: 100Gi
       pvcMetrics:
-        enabled: false
-        prometheusBaseUrl: ""
-        queryTimeout: 3s
-      pod:
-        serviceAccountName: ""
-        mountPath: /srv
-        databasePath: /tmp/filebrowser.db
-        cpuRequest: 50m
-        memoryRequest: 64Mi
-        cpuLimit: 500m
-        memoryLimit: 512Mi
-      service:
-        type: ClusterIP
-        port: 80
+        enabled: true
+        prometheusBaseUrl: "http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus"
       ingress:
-        className: nginx
         hostPrefix: viewer
-        # Empty uses the injected certSecretName when disableHttps is false.
-        tlsSecretName: ""
     observability:
-      serviceName: storage-manager-viewer
-      logs:
-        exporter: encore
-        level: info
       traces:
-        exporter: none
         endpoint: ""
-        sampleRatio: 1
-        batchTimeout: 5s
-        exportTimeout: 5s
-    debug:
-      enabled: false
-      forcedNamespace: ""
 
 web:
   replicaCount: 1
-  image:
-    repository: ghcr.io/OWNER/REPO-web
-    tag: latest
-    pullPolicy: IfNotPresent
-  service:
-    name: viewer-web
-    type: ClusterIP
-    port: 80
-    targetPort: http
-  containerPort: 8080
-  configMapName: viewer-web-config
   runtimeConfig:
     apiBaseUrl: /api
-    forcedLanguage: ""
-    fileUploadTusThresholdBytes: 33554432
-    fileUploadTusChunkBytes: 8388608
-    fileUploadTusRetryCount: 5
-  nginx:
-    clientMaxBodySize: "0"
   publicHost: ""
   ingress:
     enabled: true
-    className: nginx
-    annotations: {}
-    path: /
-    pathType: Prefix
     tls:
       enabled: true
-      secretName: ""
+
+rbac:
+  create: true
 
 storageClassAdmin:
   create: true
-  serviceAccountName: storageclass-admin
-  clusterRoleName: storage-manager-storageclass-admin
-  roleName: viewer-backend-impersonate-storageclass-admin
 
 desktopApp:
   create: true
-  namespace: app-system
-  slug: storage-manager
-  name: Storage Manager
-  desc: Storage Manager
-  displayType: normal
-  type: iframe
-  iconPath: /favicon.svg
-  i18n:
-    zh:
-      name: 存储管理
-    zh-Hans:
-      name: 存储管理

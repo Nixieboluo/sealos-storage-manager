@@ -90,7 +90,9 @@ func (c *Client) StorageQuota(ctx context.Context, workspace string, authorizati
 	if err != nil {
 		return StorageQuota{}, fmt.Errorf("requesting workspace quota: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return StorageQuota{}, fmt.Errorf("workspace quota status %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
