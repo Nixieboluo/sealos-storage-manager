@@ -538,7 +538,7 @@ func TestDeployChartHasPackagedAppValues(t *testing.T) {
 	}
 }
 
-func TestDeployChartPackagedUserValuesMatchDefaults(t *testing.T) {
+func TestDeployChartPackagedConfigValuesMatchDefaults(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
@@ -547,8 +547,8 @@ func TestDeployChartPackagedUserValuesMatchDefaults(t *testing.T) {
 
 	defaultValues := loadYAMLMap(t, defaultValuesPath)
 	packagedValues := loadYAMLMap(t, packagedValuesPath)
-	if diff := cmpYAML(defaultValues["user"], packagedValues["user"]); diff != "" {
-		t.Fatalf("packaged user values must match default values.yaml user section (-default +packaged):\n%s", diff)
+	if diff := cmpYAML(defaultValues["config"], packagedValues["config"]); diff != "" {
+		t.Fatalf("packaged config values must match default values.yaml config section (-default +packaged):\n%s", diff)
 	}
 	for _, required := range []string{"cloudDomain", "cloudPort", "httpPort", "disableHttps", "certSecretName"} {
 		if _, ok := defaultValues[required]; !ok {
@@ -560,41 +560,39 @@ func TestDeployChartPackagedUserValuesMatchDefaults(t *testing.T) {
 	}
 }
 
-func TestDeployChartInternalDefaultsUseUserValues(t *testing.T) {
+func TestDeployChartInternalConfigIsNotDuplicated(t *testing.T) {
 	t.Parallel()
 
 	valuesPath := filepath.Join(repoRoot(t), "deploy", "charts", "storage-manager", "values.yaml")
 	values := loadYAMLMap(t, valuesPath)
-	user := requiredYAMLMap(t, values, "user")
-	features := requiredYAMLMap(t, user, "features")
-	integrations := requiredYAMLMap(t, user, "integrations")
-	viewer := requiredYAMLMap(t, user, "viewer")
-	web := requiredYAMLMap(t, user, "web")
-	desktop := requiredYAMLMap(t, user, "desktop")
 	backend := requiredYAMLMap(t, values, "backend")
 	backendConfig := requiredYAMLMap(t, backend, "config")
 	backendViewer := requiredYAMLMap(t, backendConfig, "viewer")
 	backendFilebrowser := requiredYAMLMap(t, backendViewer, "filebrowser")
-	backendFileManagement := requiredYAMLMap(t, backendViewer, "fileManagement")
-	backendPVCCreation := requiredYAMLMap(t, backendViewer, "pvcCreation")
 	backendStorageQuota := requiredYAMLMap(t, backendViewer, "storageQuota")
 	backendPVCMetrics := requiredYAMLMap(t, backendViewer, "pvcMetrics")
 	backendIngress := requiredYAMLMap(t, backendViewer, "ingress")
 	webValues := requiredYAMLMap(t, values, "web")
 	webRuntimeConfig := requiredYAMLMap(t, webValues, "runtimeConfig")
-	desktopApp := requiredYAMLMap(t, values, "desktopApp")
 
-	equalYAMLValue(t, "backend.config.viewer.hookClientToken", user["hookClientToken"], backendViewer["hookClientToken"])
-	equalYAMLValue(t, "backend.config.viewer.filebrowser.loginUrlMode", viewer["filebrowserLoginUrlMode"], backendFilebrowser["loginUrlMode"])
-	equalYAMLValue(t, "backend.config.viewer.fileManagement.enabled", features["fileManagement"], backendFileManagement["enabled"])
-	equalYAMLValue(t, "backend.config.viewer.pvcCreation.enabled", features["pvcCreation"], backendPVCCreation["enabled"])
-	equalYAMLValue(t, "backend.config.viewer.storageQuota.enabled", features["storageQuota"], backendStorageQuota["enabled"])
-	equalYAMLValue(t, "backend.config.viewer.storageQuota.accountBaseUrl", integrations["accountBaseUrl"], backendStorageQuota["accountBaseUrl"])
-	equalYAMLValue(t, "backend.config.viewer.pvcMetrics.enabled", features["pvcMetrics"], backendPVCMetrics["enabled"])
-	equalYAMLValue(t, "backend.config.viewer.pvcMetrics.prometheusBaseUrl", integrations["prometheusBaseUrl"], backendPVCMetrics["prometheusBaseUrl"])
-	equalYAMLValue(t, "backend.config.viewer.ingress.hostPrefix", viewer["hostPrefix"], backendIngress["hostPrefix"])
-	equalYAMLValue(t, "web.runtimeConfig.apiBaseUrl", web["apiBaseUrl"], webRuntimeConfig["apiBaseUrl"])
-	equalYAMLValue(t, "desktopApp.create", desktop["enabled"], desktopApp["create"])
+	for _, duplicate := range []struct {
+		scope string
+		m     map[string]any
+		keys  []string
+	}{
+		{scope: "backend.config.viewer", m: backendViewer, keys: []string{"backendVerifyUrl", "hookClientToken", "fileManagement", "pvcCreation"}},
+		{scope: "backend.config.viewer.filebrowser", m: backendFilebrowser, keys: []string{"loginUrlMode"}},
+		{scope: "backend.config.viewer.storageQuota", m: backendStorageQuota, keys: []string{"enabled", "accountBaseUrl"}},
+		{scope: "backend.config.viewer.pvcMetrics", m: backendPVCMetrics, keys: []string{"enabled", "prometheusBaseUrl"}},
+		{scope: "backend.config.viewer.ingress", m: backendIngress, keys: []string{"hostPrefix"}},
+		{scope: "web.runtimeConfig", m: webRuntimeConfig, keys: []string{"apiBaseUrl"}},
+	} {
+		for _, key := range duplicate.keys {
+			if _, ok := duplicate.m[key]; ok {
+				t.Fatalf("%s.%s duplicates config values", duplicate.scope, key)
+			}
+		}
+	}
 }
 
 func TestDeployEntrypointSyncsPackagedValuesToAppsDir(t *testing.T) {
@@ -664,14 +662,14 @@ func TestDeployPackagedValuesUseUserLevelOverrides(t *testing.T) {
 	valuesPath := filepath.Join(root, "deploy", "charts", "storage-manager", "storage-manager-values.yaml")
 	viewerYAML := deployViewerYAML(t,
 		"-f", valuesPath,
-		"--set", "user.adminUserIds[0]=alice",
-		"--set", "user.hookClientToken=token-123",
-		"--set", "user.integrations.accountBaseUrl=http://account.example.svc:2333",
-		"--set", "user.integrations.prometheusBaseUrl=http://prom.example.svc:8481/select/0/prometheus",
-		"--set", "user.viewer.hostPrefix=pvc-viewer",
-		"--set", "user.viewer.filebrowserLoginUrlMode=public",
-		"--set", "user.features.fileManagement=false",
-		"--set", "user.features.pvcMetrics=false",
+		"--set", "config.adminUserIds[0]=alice",
+		"--set", "config.hookClientToken=token-123",
+		"--set", "config.integrations.accountBaseUrl=http://account.example.svc:2333",
+		"--set", "config.integrations.prometheusBaseUrl=http://prom.example.svc:8481/select/0/prometheus",
+		"--set", "config.viewer.hostPrefix=pvc-viewer",
+		"--set", "config.viewer.filebrowserLoginUrlMode=public",
+		"--set", "config.features.fileManagement=false",
+		"--set", "config.features.pvcMetrics=false",
 		"--set", "cloudDomain=cloud.sealos.test",
 	)
 	for _, expected := range []string{
@@ -696,8 +694,8 @@ func TestDeployChartDerivesPublicHostsFromCloudDomain(t *testing.T) {
 	viewerYAML := deployViewerYAML(t,
 		"--set", "cloudDomain=cloud.sealos.test",
 		"--set", "cloudPort=7443",
-		"--set", "user.web.publicHost=storage.cloud.sealos.test",
-		"--set", "user.viewer.hostPrefix=pvc-viewer",
+		"--set", "config.web.publicHost=storage.cloud.sealos.test",
+		"--set", "config.viewer.hostPrefix=pvc-viewer",
 	)
 	if !strings.Contains(viewerYAML, `backend_verify_url: "http://viewer-backend.storage-manager.svc.cluster.local/internal/filebrowser-hook/verify"`) {
 		t.Fatalf("viewer.yaml missing derived backend verify URL:\n%s", viewerYAML)

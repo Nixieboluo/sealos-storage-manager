@@ -1,7 +1,7 @@
-# User-level values for the Sealos Storage Manager install package.
+# User-level config for the Sealos Storage Manager install package.
 # Advanced chart internals remain configurable through values.yaml paths.
 
-user:
+config:
   adminUserIds:
     - admin
   hookClientToken: replace-me

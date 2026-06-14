@@ -223,7 +223,7 @@ The chart derives:
 - File Browser viewer host template:
   `<hostPrefix>-{{ .PodSessionID }}.<cloudDomain>`
 
-Override `user.hookClientToken` before exposing the service. The committed
+Override `config.hookClientToken` before exposing the service. The committed
 value is a placeholder token.
 
 Expose `viewer-web` as the public entrypoint. The chart renders nginx config
@@ -232,15 +232,16 @@ unprefixed routes, and proxies `/metrics` plus
 `/internal/filebrowser-hook/verify` to the internal `viewer-backend` service.
 
 Use `charts/storage-manager/storage-manager-values.yaml` as the user-level
-override entrypoint for Sealos installs. It exposes product-facing `user.*`
-values such as `user.adminUserIds`, `user.hookClientToken`,
-`user.integrations.*`, `user.viewer.*`, `user.web.*`, `user.desktop.enabled`,
-and `user.features.*`. Use `user.*` for every field represented there; the
+override entrypoint for Sealos installs. It exposes product-facing `config.*`
+values such as `config.adminUserIds`, `config.hookClientToken`,
+`config.integrations.*`, `config.viewer.*`, `config.web.*`,
+`config.desktop.enabled`, and `config.features.*`. Use `config.*` for every
+field represented there; the
 chart's internal `backend.*`, `web.*`, `rbac.*`, and `desktopApp.*` paths remain
 available for low-level Helm wiring and fields outside the packaged user
 surface.
 
-The default `user.web.apiBaseUrl` is `/api`, which keeps browser API requests on
+The default `config.web.apiBaseUrl` is `/api`, which keeps browser API requests on
 the same origin as the web app and lets the frontend service own the public
 rewrite.
 

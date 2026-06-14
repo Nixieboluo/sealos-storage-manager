@@ -4,27 +4,27 @@ httpPort: ""
 disableHttps: false
 certSecretName: wildcard-cert
 
-user:
+config:
   adminUserIds:
     - admin
-  hookClientToken: &userHookClientToken replace-me
+  hookClientToken: replace-me
   features:
-    fileManagement: &userFeatureFileManagement true
-    pvcCreation: &userFeaturePVCCreation true
-    storageQuota: &userFeatureStorageQuota true
-    pvcMetrics: &userFeaturePVCMetrics true
+    fileManagement: true
+    pvcCreation: true
+    storageQuota: true
+    pvcMetrics: true
   integrations:
-    accountBaseUrl: &userAccountBaseUrl "http://account-service.account-system.svc:2333"
-    prometheusBaseUrl: &userPrometheusBaseUrl "http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus"
+    accountBaseUrl: "http://account-service.account-system.svc:2333"
+    prometheusBaseUrl: "http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus"
   viewer:
-    hostPrefix: &userViewerHostPrefix viewer
+    hostPrefix: viewer
     backendVerifyUrl: ""
-    filebrowserLoginUrlMode: &userFilebrowserLoginUrlMode internal
+    filebrowserLoginUrlMode: internal
   web:
-    apiBaseUrl: &userWebAPIBaseUrl /api
+    apiBaseUrl: /api
     publicHost: ""
   desktop:
-    enabled: &userDesktopEnabled true
+    enabled: true
 
 rbac:
   create: true
@@ -48,31 +48,18 @@ backend:
   configMountPath: /app/config
   config:
     admin:
-      allowedUserIds:
-        - admin
       storageClassServiceAccountName: storageclass-admin
     viewer:
-      backendVerifyUrl: ""
-      hookClientToken: *userHookClientToken
       filebrowser:
         image: filebrowser/filebrowser:v2.30.0
         binaryPath: /filebrowser
         port: 8080
         tokenTtl: 15m
         loginTimeout: 2s
-        loginUrlMode: *userFilebrowserLoginUrlMode
-      fileManagement:
-        enabled: *userFeatureFileManagement
-      pvcCreation:
-        enabled: *userFeaturePVCCreation
       storageQuota:
-        enabled: *userFeatureStorageQuota
-        accountBaseUrl: *userAccountBaseUrl
         queryTimeout: 3s
         systemQuota: 100Gi
       pvcMetrics:
-        enabled: *userFeaturePVCMetrics
-        prometheusBaseUrl: *userPrometheusBaseUrl
         queryTimeout: 3s
       pod:
         serviceAccountName: ""
@@ -87,7 +74,6 @@ backend:
         port: 80
       ingress:
         className: nginx
-        hostPrefix: *userViewerHostPrefix
         # Empty uses the injected certSecretName when disableHttps is false.
         tlsSecretName: ""
     observability:
@@ -119,7 +105,6 @@ web:
   containerPort: 8080
   configMapName: viewer-web-config
   runtimeConfig:
-    apiBaseUrl: *userWebAPIBaseUrl
     forcedLanguage: ""
     fileUploadTusThresholdBytes: 33554432
     fileUploadTusChunkBytes: 8388608
@@ -144,7 +129,7 @@ storageClassAdmin:
   roleName: viewer-backend-impersonate-storageclass-admin
 
 desktopApp:
-  create: *userDesktopEnabled
+  create: true
   namespace: app-system
   slug: storage-manager
   name: Storage Manager

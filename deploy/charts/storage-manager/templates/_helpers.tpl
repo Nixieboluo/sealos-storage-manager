@@ -67,9 +67,12 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "storage-manager.webHost" -}}
+{{- $config := default dict .Values.config -}}
 {{- $user := default dict .Values.user -}}
+{{- $configWeb := default dict (get $config "web") -}}
 {{- $webUser := default dict (get $user "web") -}}
-{{- $publicHost := default .Values.web.publicHost (get $webUser "publicHost") -}}
+{{- $publicHost := default .Values.web.publicHost (get $configWeb "publicHost") -}}
+{{- $publicHost = default $publicHost (get $webUser "publicHost") -}}
 {{- default (printf "storage-manager.%s" (default "127.0.0.1.nip.io" .Values.cloudDomain)) $publicHost -}}
 {{- end -}}
 
@@ -78,9 +81,12 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "storage-manager.viewerHostTemplate" -}}
+{{- $config := default dict .Values.config -}}
 {{- $user := default dict .Values.user -}}
+{{- $configViewer := default dict (get $config "viewer") -}}
 {{- $viewerUser := default dict (get $user "viewer") -}}
-{{- $hostPrefix := default .Values.backend.config.viewer.ingress.hostPrefix (get $viewerUser "hostPrefix") -}}
+{{- $hostPrefix := default .Values.backend.config.viewer.ingress.hostPrefix (get $configViewer "hostPrefix") -}}
+{{- $hostPrefix = default $hostPrefix (get $viewerUser "hostPrefix") -}}
 {{- printf "%s-{{ .PodSessionID }}.%s" $hostPrefix (default "127.0.0.1.nip.io" .Values.cloudDomain) -}}
 {{- end -}}
 
@@ -93,9 +99,12 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
 
 {{- define "storage-manager.backendVerifyURL" -}}
+{{- $config := default dict .Values.config -}}
 {{- $user := default dict .Values.user -}}
+{{- $configViewer := default dict (get $config "viewer") -}}
 {{- $viewerUser := default dict (get $user "viewer") -}}
-{{- $backendVerifyURL := default .Values.backend.config.viewer.backendVerifyUrl (get $viewerUser "backendVerifyUrl") -}}
+{{- $backendVerifyURL := default .Values.backend.config.viewer.backendVerifyUrl (get $configViewer "backendVerifyUrl") -}}
+{{- $backendVerifyURL = default $backendVerifyURL (get $viewerUser "backendVerifyUrl") -}}
 {{- if $backendVerifyURL -}}
 {{- $backendVerifyURL -}}
 {{- else -}}
