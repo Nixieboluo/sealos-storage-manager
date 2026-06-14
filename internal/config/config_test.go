@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -604,7 +603,7 @@ func TestDeployEntrypointInitializesPackagedValuesToAppsDir(t *testing.T) {
 	t.Parallel()
 
 	entrypointPath := filepath.Join(repoRoot(t), "deploy", "entrypoint.sh")
-	body, err := os.ReadFile(entrypointPath)
+	body, err := os.ReadFile(entrypointPath) //nolint:gosec // Test reads a committed repo fixture path.
 	if err != nil {
 		t.Fatalf("read deploy entrypoint: %v", err)
 	}
@@ -939,7 +938,7 @@ func renderDeployChart(t *testing.T) []byte {
 func loadYAMLMap(t *testing.T, path string) map[string]any {
 	t.Helper()
 
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // Test reads committed repo fixture paths.
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
@@ -983,29 +982,6 @@ func hasYAMLPath(root map[string]any, path ...string) bool {
 		}
 	}
 	return true
-}
-
-func equalYAMLValue(t *testing.T, field string, want any, got any) {
-	t.Helper()
-
-	if diff := cmpYAML(want, got); diff != "" {
-		t.Fatalf("%s does not match user default (-user +internal):\n%s", field, diff)
-	}
-}
-
-func cmpYAML(a any, b any) string {
-	left, err := yaml.Marshal(a)
-	if err != nil {
-		return "marshal left: " + err.Error()
-	}
-	right, err := yaml.Marshal(b)
-	if err != nil {
-		return "marshal right: " + err.Error()
-	}
-	if string(left) == string(right) {
-		return ""
-	}
-	return fmt.Sprintf("default:\n%s\npackaged:\n%s", left, right)
 }
 
 func renderDeployChartWithArgs(t *testing.T, args ...string) []byte {
