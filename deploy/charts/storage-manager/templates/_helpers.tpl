@@ -68,13 +68,8 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 
 {{- define "storage-manager.webHost" -}}
 {{- $config := default dict .Values.config -}}
-{{- $user := default dict .Values.user -}}
-{{- $webValues := default dict .Values.web -}}
 {{- $configWeb := default dict (get $config "web") -}}
-{{- $webUser := default dict (get $user "web") -}}
-{{- $publicHost := default (get $webValues "publicHost") (get $config "publicHost") -}}
-{{- $publicHost = default $publicHost (get $configWeb "publicHost") -}}
-{{- $publicHost = default $publicHost (get $webUser "publicHost") -}}
+{{- $publicHost := get $configWeb "publicHost" -}}
 {{- default (printf "storage-manager.%s" (default "127.0.0.1.nip.io" .Values.cloudDomain)) $publicHost -}}
 {{- end -}}
 
@@ -84,34 +79,21 @@ app.kubernetes.io/instance: {{ .Release.Name | quote }}
 
 {{- define "storage-manager.viewerHostTemplate" -}}
 {{- $config := default dict .Values.config -}}
-{{- $user := default dict .Values.user -}}
 {{- $configViewer := default dict (get $config "viewer") -}}
-{{- $viewerUser := default dict (get $user "viewer") -}}
-{{- $backendConfig := default dict .Values.backend.config -}}
-{{- $backendViewer := default dict (get $backendConfig "viewer") -}}
-{{- $backendIngress := default dict (get $backendViewer "ingress") -}}
-{{- $hostPrefix := default (get $backendIngress "hostPrefix") (get $configViewer "hostPrefix") -}}
-{{- $hostPrefix = default $hostPrefix (get $viewerUser "hostPrefix") -}}
+{{- $hostPrefix := get $configViewer "hostPrefix" -}}
 {{- printf "%s-{{ .PodSessionID }}.%s" $hostPrefix (default "127.0.0.1.nip.io" .Values.cloudDomain) -}}
 {{- end -}}
 
 {{- define "storage-manager.viewerTLSSecretName" -}}
-{{- if .Values.backend.config.viewer.ingress.tlsSecretName -}}
-{{- .Values.backend.config.viewer.ingress.tlsSecretName -}}
-{{- else if not (eq (toString (default false .Values.disableHttps)) "true") -}}
+{{- if not (eq (toString (default false .Values.disableHttps)) "true") -}}
 {{- (default "wildcard-cert" .Values.certSecretName) -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "storage-manager.backendVerifyURL" -}}
 {{- $config := default dict .Values.config -}}
-{{- $user := default dict .Values.user -}}
 {{- $configViewer := default dict (get $config "viewer") -}}
-{{- $viewerUser := default dict (get $user "viewer") -}}
-{{- $backendConfig := default dict .Values.backend.config -}}
-{{- $backendViewer := default dict (get $backendConfig "viewer") -}}
-{{- $backendVerifyURL := default (get $backendViewer "backendVerifyUrl") (get $configViewer "backendVerifyUrl") -}}
-{{- $backendVerifyURL = default $backendVerifyURL (get $viewerUser "backendVerifyUrl") -}}
+{{- $backendVerifyURL := get $configViewer "backendVerifyUrl" -}}
 {{- if $backendVerifyURL -}}
 {{- $backendVerifyURL -}}
 {{- else -}}

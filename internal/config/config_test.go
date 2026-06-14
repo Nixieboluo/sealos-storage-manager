@@ -550,6 +550,14 @@ func TestDeployChartPackagedConfigValuesMatchDefaults(t *testing.T) {
 	if diff := cmpYAML(defaultValues["config"], packagedValues["config"]); diff != "" {
 		t.Fatalf("packaged config values must match default values.yaml config section (-default +packaged):\n%s", diff)
 	}
+	defaultDesktopApp := requiredYAMLMap(t, defaultValues, "desktopApp")
+	packagedDesktopApp := requiredYAMLMap(t, packagedValues, "desktopApp")
+	if diff := cmpYAML(defaultDesktopApp["create"], packagedDesktopApp["create"]); diff != "" {
+		t.Fatalf("packaged desktopApp.create must match default values.yaml desktopApp.create (-default +packaged):\n%s", diff)
+	}
+	if len(packagedDesktopApp) != 1 {
+		t.Fatalf("packaged desktopApp values should only expose create, got %#v", packagedDesktopApp)
+	}
 	for _, required := range []string{"cloudDomain", "cloudPort", "httpPort", "disableHttps", "certSecretName"} {
 		if _, ok := defaultValues[required]; !ok {
 			t.Fatalf("default values.yaml missing chart runtime value %q", required)
@@ -568,13 +576,16 @@ func TestDeployChartInternalConfigIsNotDuplicated(t *testing.T) {
 	backend := requiredYAMLMap(t, values, "backend")
 	backendConfig := requiredYAMLMap(t, backend, "config")
 	backendViewer := requiredYAMLMap(t, backendConfig, "viewer")
-	for _, required := range []string{"service", "ingress"} {
+	for _, required := range []string{"service"} {
 		if _, ok := backendViewer[required]; !ok {
 			t.Fatalf("backend.config.viewer missing deployment wiring key %q", required)
 		}
 	}
 
 	for _, path := range [][]string{
+		{"config", "publicHost"},
+		{"config", "desktop"},
+		{"backend", "config", "admin"},
 		{"backend", "config", "admin", "allowedUserIds"},
 		{"backend", "config", "viewer", "backendVerifyUrl"},
 		{"backend", "config", "viewer", "hookClientToken"},
@@ -584,10 +595,12 @@ func TestDeployChartInternalConfigIsNotDuplicated(t *testing.T) {
 		{"backend", "config", "viewer", "storageQuota"},
 		{"backend", "config", "viewer", "pvcMetrics"},
 		{"backend", "config", "viewer", "pod"},
+		{"backend", "config", "viewer", "ingress"},
 		{"backend", "config", "viewer", "ingress", "hostPrefix"},
 		{"web", "runtimeConfig"},
 		{"web", "nginx"},
 		{"web", "publicHost"},
+		{"web", "ingress", "tls", "secretName"},
 	} {
 		if hasYAMLPath(values, path...) {
 			t.Fatalf("%s duplicates config values", strings.Join(path, "."))
@@ -736,6 +749,14 @@ func TestDeployPackagedValuesUseUserLevelOverrides(t *testing.T) {
 		if !strings.Contains(renderedChart, expected) {
 			t.Fatalf("rendered chart missing user-level value %q:\n%s", expected, renderedChart)
 		}
+	}
+
+	desktopDisabledChart := string(renderDeployChartWithArgs(t,
+		"-f", valuesPath,
+		"--set", "desktopApp.create=false",
+	))
+	if strings.Contains(desktopDisabledChart, "\nkind: App\n") {
+		t.Fatalf("desktopApp.create=false should not render App resource:\n%s", desktopDisabledChart)
 	}
 }
 

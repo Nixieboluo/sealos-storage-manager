@@ -1,14 +1,4 @@
-{{- $config := default dict .Values.config }}
-{{- $configDesktop := default dict (get $config "desktop") }}
-{{- $user := default dict .Values.user }}
-{{- $desktopUser := default dict (get $user "desktop") }}
 {{- $createDesktopApp := .Values.desktopApp.create }}
-{{- if hasKey $configDesktop "enabled" }}
-{{- $createDesktopApp = get $configDesktop "enabled" }}
-{{- end }}
-{{- if hasKey $desktopUser "enabled" }}
-{{- $createDesktopApp = get $desktopUser "enabled" }}
-{{- end }}
 {{- if $createDesktopApp }}
 apiVersion: app.sealos.io/v1
 kind: App

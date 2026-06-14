@@ -49,9 +49,6 @@ config:
     fileUploadTusRetryCount: 5
   nginx:
     clientMaxBodySize: "0"
-  publicHost: ""
-  desktop:
-    enabled: true
 
 rbac:
   create: true
@@ -74,16 +71,10 @@ backend:
   configMapName: viewer-backend-config
   configMountPath: /app/config
   config:
-    admin:
-      storageClassServiceAccountName: storageclass-admin
     viewer:
       service:
         type: ClusterIP
         port: 80
-      ingress:
-        className: nginx
-        # Empty uses the injected certSecretName when disableHttps is false.
-        tlsSecretName: ""
     observability:
       serviceName: storage-manager-viewer
       logs:
@@ -120,7 +111,6 @@ web:
     pathType: Prefix
     tls:
       enabled: true
-      secretName: ""
 
 storageClassAdmin:
   create: true

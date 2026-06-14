@@ -1,4 +1,4 @@
-# User-level config for the Sealos Storage Manager install package.
+# User-level values for the Sealos Storage Manager install package.
 # Advanced chart internals remain configurable through values.yaml paths.
 
 config:
@@ -46,6 +46,6 @@ config:
     fileUploadTusRetryCount: 5
   nginx:
     clientMaxBodySize: "0"
-  publicHost: ""
-  desktop:
-    enabled: true
+
+desktopApp:
+  create: true
