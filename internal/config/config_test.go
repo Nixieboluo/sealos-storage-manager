@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -537,6 +538,67 @@ func TestDeployChartHasPackagedAppValues(t *testing.T) {
 	}
 }
 
+func TestDeployChartPackagedUserValuesMatchDefaults(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	defaultValuesPath := filepath.Join(root, "deploy", "charts", "storage-manager", "values.yaml")
+	packagedValuesPath := filepath.Join(root, "deploy", "charts", "storage-manager", "storage-manager-values.yaml")
+
+	defaultValues := loadYAMLMap(t, defaultValuesPath)
+	packagedValues := loadYAMLMap(t, packagedValuesPath)
+	if diff := cmpYAML(defaultValues["user"], packagedValues["user"]); diff != "" {
+		t.Fatalf("packaged user values must match default values.yaml user section (-default +packaged):\n%s", diff)
+	}
+	for _, required := range []string{"cloudDomain", "cloudPort", "httpPort", "disableHttps", "certSecretName"} {
+		if _, ok := defaultValues[required]; !ok {
+			t.Fatalf("default values.yaml missing chart runtime value %q", required)
+		}
+		if _, ok := packagedValues[required]; ok {
+			t.Fatalf("packaged user values should not expose chart runtime value %q", required)
+		}
+	}
+}
+
+func TestDeployEntrypointSyncsPackagedValuesToAppsDir(t *testing.T) {
+	t.Parallel()
+
+	entrypointPath := filepath.Join(repoRoot(t), "deploy", "entrypoint.sh")
+	body, err := os.ReadFile(entrypointPath)
+	if err != nil {
+		t.Fatalf("read deploy entrypoint: %v", err)
+	}
+	entrypoint := string(body)
+	for _, expected := range []string{
+		`APP_VALUES_DIR=${APP_VALUES_DIR:-"/root/.sealos/cloud/values/apps/storage-manager"}`,
+		`sync_packaged_app_values "$PACKAGED_APP_VALUES_FILE" "$APP_VALUES_DIR"`,
+		`cp -f "$source_file" "$target_file"`,
+		`HELM_VALUES_ARGS=()`,
+		`append_app_values "$APP_VALUES_DIR"`,
+		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" cloudDomain`,
+		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" cloudPort`,
+		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" httpPort`,
+		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" disableHttps`,
+		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" certSecretName`,
+	} {
+		if !strings.Contains(entrypoint, expected) {
+			t.Fatalf("entrypoint missing %q", expected)
+		}
+	}
+	for _, forbidden := range []string{
+		"SEALOS_GLOBAL_VALUES_FILE",
+		"ensure_global_values_ready_for_component",
+		"global_http_",
+		"read_global_value",
+		"read_yaml_file_path",
+		`HELM_VALUES_ARGS=("-f" "$PACKAGED_APP_VALUES_FILE")`,
+	} {
+		if strings.Contains(entrypoint, forbidden) {
+			t.Fatalf("entrypoint should not contain %q", forbidden)
+		}
+	}
+}
+
 func TestDeployChartDoesNotRenderNamespaceResource(t *testing.T) {
 	t.Parallel()
 
@@ -597,8 +659,8 @@ func TestDeployChartDerivesPublicHostsFromCloudDomain(t *testing.T) {
 	viewerYAML := deployViewerYAML(t,
 		"--set", "cloudDomain=cloud.sealos.test",
 		"--set", "cloudPort=7443",
-		"--set", "web.publicHost=storage.cloud.sealos.test",
-		"--set", "backend.config.viewer.ingress.hostPrefix=pvc-viewer",
+		"--set", "user.web.publicHost=storage.cloud.sealos.test",
+		"--set", "user.viewer.hostPrefix=pvc-viewer",
 	)
 	if !strings.Contains(viewerYAML, `backend_verify_url: "http://viewer-backend.storage-manager.svc.cluster.local/internal/filebrowser-hook/verify"`) {
 		t.Fatalf("viewer.yaml missing derived backend verify URL:\n%s", viewerYAML)
@@ -753,6 +815,35 @@ func TestDeployStorageClassAdminManifest(t *testing.T) {
 func renderDeployChart(t *testing.T) []byte {
 	t.Helper()
 	return renderDeployChartWithArgs(t)
+}
+
+func loadYAMLMap(t *testing.T, path string) map[string]any {
+	t.Helper()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out map[string]any
+	if err := yaml.Unmarshal(body, &out); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return out
+}
+
+func cmpYAML(a any, b any) string {
+	left, err := yaml.Marshal(a)
+	if err != nil {
+		return "marshal left: " + err.Error()
+	}
+	right, err := yaml.Marshal(b)
+	if err != nil {
+		return "marshal right: " + err.Error()
+	}
+	if string(left) == string(right) {
+		return ""
+	}
+	return fmt.Sprintf("default:\n%s\npackaged:\n%s", left, right)
 }
 
 func renderDeployChartWithArgs(t *testing.T, args ...string) []byte {

@@ -1,3 +1,31 @@
+cloudDomain: 127.0.0.1.nip.io
+cloudPort: ""
+httpPort: ""
+disableHttps: false
+certSecretName: wildcard-cert
+
+user:
+  adminUserIds:
+    - admin
+  hookClientToken: replace-me
+  features:
+    fileManagement: true
+    pvcCreation: true
+    storageQuota: true
+    pvcMetrics: true
+  integrations:
+    accountBaseUrl: "http://account-service.account-system.svc:2333"
+    prometheusBaseUrl: "http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus"
+  viewer:
+    hostPrefix: viewer
+    backendVerifyUrl: ""
+    filebrowserLoginUrlMode: internal
+  web:
+    apiBaseUrl: /api
+    publicHost: ""
+  desktop:
+    enabled: true
+
 rbac:
   create: true
 

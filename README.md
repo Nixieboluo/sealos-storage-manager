@@ -211,10 +211,10 @@ deployment. Validate it before shipping changes:
 make deploy-verify
 ```
 
-In Sealos-managed installs, `deploy/entrypoint.sh` injects global HTTP/TLS
-settings into Helm from `/root/.sealos/cloud/values/global.yaml` and
+In Sealos-managed installs, `deploy/entrypoint.sh` injects install-time
+HTTP/TLS settings into Helm from environment overrides and
 `sealos-system/sealos-config`. The chart defaults intentionally omit those
-global values.
+cluster-specific values.
 
 The chart derives:
 
@@ -235,9 +235,10 @@ Use `charts/storage-manager/storage-manager-values.yaml` as the user-level
 override entrypoint for Sealos installs. It exposes product-facing `user.*`
 values such as `user.adminUserIds`, `user.hookClientToken`,
 `user.integrations.*`, `user.viewer.*`, `user.web.*`, `user.desktop.enabled`,
-and `user.features.*`. The chart's internal `backend.*`, `web.*`, `rbac.*`,
-and `desktopApp.*` paths remain available for advanced Helm overrides, but they
-are not the recommended install-package interface.
+and `user.features.*`. Use `user.*` for every field represented there; the
+chart's internal `backend.*`, `web.*`, `rbac.*`, and `desktopApp.*` paths remain
+available for low-level Helm wiring and fields outside the packaged user
+surface.
 
 The default `user.web.apiBaseUrl` is `/api`, which keeps browser API requests on
 the same origin as the web app and lets the frontend service own the public
@@ -250,10 +251,12 @@ rewrite.
 - `Kubefile`, which packages cached runtime images, charts, and the install
   entrypoint.
 - `entrypoint.sh`, which sources `/root/.sealos/cloud/scripts/tools.sh`, reads
-  global HTTP/TLS settings, loads packaged values plus all
-  `/root/.sealos/cloud/values/apps/storage-manager/*-values.yaml`
-  overrides, and runs `helm upgrade -i ... --create-namespace`. The chart does
-  not render a `Namespace` resource.
+  install-time HTTP/TLS settings from `sealos-system/sealos-config`, syncs the
+  packaged `storage-manager-values.yaml` into
+  `/root/.sealos/cloud/values/apps/storage-manager/`, loads all
+  `*-values.yaml` files from that app values directory, and runs
+  `helm upgrade -i ... --create-namespace`. The chart does not render a
+  `Namespace` resource.
 - `charts/storage-manager/storage-manager-values.yaml`, the
   user-level packaged values used by Sealos app installs.
 
