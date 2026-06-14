@@ -733,12 +733,20 @@ func TestDeployPackagedValuesUseUserLevelOverrides(t *testing.T) {
 		`query_timeout: "8s"`,
 		`host_template: "pvc-viewer-{{ .PodSessionID }}.cloud.sealos.test"`,
 		`login_url_mode: "public"`,
-		"file_management:\n        enabled: false",
-		"pvc_metrics:\n        enabled: false",
 	} {
 		if !strings.Contains(viewerYAML, expected) {
 			t.Fatalf("viewer.yaml missing user-level value %q:\n%s", expected, viewerYAML)
 		}
+	}
+	viewerConfig := parseYAMLStringMap(t, "viewer.yaml", viewerYAML)
+	viewerSection := requiredYAMLMap(t, viewerConfig, "viewer")
+	fileManagement := requiredYAMLMap(t, viewerSection, "file_management")
+	pvcMetrics := requiredYAMLMap(t, viewerSection, "pvc_metrics")
+	if got := fileManagement["enabled"]; got != false {
+		t.Fatalf("viewer.file_management.enabled = %#v, want false", got)
+	}
+	if got := pvcMetrics["enabled"]; got != false {
+		t.Fatalf("viewer.pvc_metrics.enabled = %#v, want false", got)
 	}
 
 	renderedChart := string(renderDeployChartWithArgs(t, args...))
@@ -935,9 +943,15 @@ func loadYAMLMap(t *testing.T, path string) map[string]any {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
+	return parseYAMLStringMap(t, path, string(body))
+}
+
+func parseYAMLStringMap(t *testing.T, name string, body string) map[string]any {
+	t.Helper()
+
 	var out map[string]any
-	if err := yaml.Unmarshal(body, &out); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+	if err := yaml.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("parse %s: %v", name, err)
 	}
 	return out
 }
