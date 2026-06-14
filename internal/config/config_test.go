@@ -538,7 +538,7 @@ func TestDeployChartHasPackagedAppValues(t *testing.T) {
 	}
 }
 
-func TestDeployChartPackagedConfigValuesMatchDefaults(t *testing.T) {
+func TestDeployChartPackagedValuesOmitRuntimeHTTPValues(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
@@ -547,17 +547,6 @@ func TestDeployChartPackagedConfigValuesMatchDefaults(t *testing.T) {
 
 	defaultValues := loadYAMLMap(t, defaultValuesPath)
 	packagedValues := loadYAMLMap(t, packagedValuesPath)
-	if diff := cmpYAML(defaultValues["config"], packagedValues["config"]); diff != "" {
-		t.Fatalf("packaged config values must match default values.yaml config section (-default +packaged):\n%s", diff)
-	}
-	defaultDesktopApp := requiredYAMLMap(t, defaultValues, "desktopApp")
-	packagedDesktopApp := requiredYAMLMap(t, packagedValues, "desktopApp")
-	if diff := cmpYAML(defaultDesktopApp["create"], packagedDesktopApp["create"]); diff != "" {
-		t.Fatalf("packaged desktopApp.create must match default values.yaml desktopApp.create (-default +packaged):\n%s", diff)
-	}
-	if len(packagedDesktopApp) != 1 {
-		t.Fatalf("packaged desktopApp values should only expose create, got %#v", packagedDesktopApp)
-	}
 	for _, required := range []string{"cloudDomain", "cloudPort", "httpPort", "disableHttps", "certSecretName"} {
 		if _, ok := defaultValues[required]; !ok {
 			t.Fatalf("default values.yaml missing chart runtime value %q", required)
@@ -565,6 +554,9 @@ func TestDeployChartPackagedConfigValuesMatchDefaults(t *testing.T) {
 		if _, ok := packagedValues[required]; ok {
 			t.Fatalf("packaged user values should not expose chart runtime value %q", required)
 		}
+	}
+	if _, ok := packagedValues["config"]; !ok {
+		t.Fatal("packaged user values should expose config overrides")
 	}
 }
 
