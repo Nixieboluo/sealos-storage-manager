@@ -254,11 +254,11 @@ rewrite.
 - `Kubefile`, which packages cached runtime images, charts, and the install
   entrypoint.
 - `entrypoint.sh`, which sources `/root/.sealos/cloud/scripts/tools.sh`, reads
-  install-time HTTP/TLS settings from `sealos-system/sealos-config`, syncs the
-  packaged `storage-manager-values.yaml` into
-  `/root/.sealos/cloud/values/apps/storage-manager/`, loads all
-  `*-values.yaml` files from that app values directory, and runs
-  `helm upgrade -i ... --create-namespace`. The chart does not render a
+  install-time HTTP/TLS settings from `sealos-system/sealos-config`,
+  initializes `/root/.sealos/cloud/values/apps/storage-manager/` with the
+  packaged `storage-manager-values.yaml` when that app values directory is
+  missing, loads all `*-values.yaml` files from that app values directory, and
+  runs `helm upgrade -i ... --create-namespace`. The chart does not render a
   `Namespace` resource.
 - `charts/storage-manager/storage-manager-values.yaml`, the
   user-level packaged values used by Sealos app installs.

@@ -608,7 +608,7 @@ func TestDeployChartInternalConfigIsNotDuplicated(t *testing.T) {
 	}
 }
 
-func TestDeployEntrypointSyncsPackagedValuesToAppsDir(t *testing.T) {
+func TestDeployEntrypointInitializesPackagedValuesToAppsDir(t *testing.T) {
 	t.Parallel()
 
 	entrypointPath := filepath.Join(repoRoot(t), "deploy", "entrypoint.sh")
@@ -620,9 +620,17 @@ func TestDeployEntrypointSyncsPackagedValuesToAppsDir(t *testing.T) {
 	for _, expected := range []string{
 		`APP_VALUES_DIR=${APP_VALUES_DIR:-"/root/.sealos/cloud/values/apps/storage-manager"}`,
 		`sync_packaged_app_values "$PACKAGED_APP_VALUES_FILE" "$APP_VALUES_DIR"`,
-		`cp -f "$source_file" "$target_file"`,
+		`source /root/.sealos/cloud/scripts/tools.sh`,
+		`if [ -d "$app_values_dir" ]; then`,
+		`warn "WARN: app values dir missing; initializing ${app_values_dir} from packaged values ${packaged_values_file}"`,
+		`cp -f "$packaged_values_file" "${app_values_dir}/storage-manager-values.yaml"`,
 		`HELM_VALUES_ARGS=()`,
 		`append_app_values "$APP_VALUES_DIR"`,
+		`global_http_disable_https`,
+		`global_http_effective_port`,
+		`global_http_external_url`,
+		`WEB_URL="$(global_http_external_url "$WEB_HOST")"`,
+		`EFFECTIVE_PORT="$(global_http_effective_port)"`,
 		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" cloudDomain`,
 		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" cloudPort`,
 		`get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" httpPort`,
@@ -636,9 +644,13 @@ func TestDeployEntrypointSyncsPackagedValuesToAppsDir(t *testing.T) {
 	for _, forbidden := range []string{
 		"SEALOS_GLOBAL_VALUES_FILE",
 		"ensure_global_values_ready_for_component",
-		"global_http_",
 		"read_global_value",
 		"read_yaml_file_path",
+		"truthy()",
+		"public_scheme()",
+		"effective_port()",
+		"public_port_suffix()",
+		"external_url()",
 		`HELM_VALUES_ARGS=("-f" "$PACKAGED_APP_VALUES_FILE")`,
 	} {
 		if strings.Contains(entrypoint, forbidden) {

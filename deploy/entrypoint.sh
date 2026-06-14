@@ -5,7 +5,11 @@ load_cloud_tools_or_exit() {
   local tools_file="/root/.sealos/cloud/scripts/tools.sh"
   local required_functions=(
     get_cm_value
+    global_http_disable_https
+    global_http_effective_port
+    global_http_external_url
     info
+    warn
     error
   )
   local missing_functions=()
@@ -23,7 +27,7 @@ EOF
   fi
 
   # shellcheck source=/dev/null
-  source "$tools_file"
+  source /root/.sealos/cloud/scripts/tools.sh
 
   for function_name in "${required_functions[@]}"; do
     if ! declare -f "$function_name" >/dev/null 2>&1; then
@@ -61,55 +65,16 @@ append_app_values() {
 }
 
 sync_packaged_app_values() {
-  local source_file="$1"
-  local values_dir="$2"
-  local target_file="${values_dir}/$(basename "$source_file")"
+  local packaged_values_file="$1"
+  local app_values_dir="$2"
 
-  mkdir -p "$values_dir"
-  cp -f "$source_file" "$target_file"
-}
-
-truthy() {
-  case "$(printf "%s" "${1:-}" | tr '[:upper:]' '[:lower:]')" in
-    true | 1 | yes | y | on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-public_scheme() {
-  if truthy "$SEALOS_DISABLE_HTTPS"; then
-    printf "http"
-  else
-    printf "https"
+  if [ -d "$app_values_dir" ]; then
+    return 0
   fi
-}
 
-effective_port() {
-  if [ "$(public_scheme)" = "http" ]; then
-    printf "%s" "$SEALOS_HTTP_PORT"
-  else
-    printf "%s" "$SEALOS_CLOUD_PORT"
-  fi
-}
-
-public_port_suffix() {
-  local scheme="$1"
-  local port="$2"
-
-  case "${scheme}:${port}" in
-    https: | https:443 | http: | http:80) return 0 ;;
-    *) printf ":%s" "$port" ;;
-  esac
-}
-
-external_url() {
-  local host="$1"
-  local scheme
-  local port
-
-  scheme="$(public_scheme)"
-  port="$(effective_port)"
-  printf "%s://%s%s" "$scheme" "$host" "$(public_port_suffix "$scheme" "$port")"
+  warn "WARN: app values dir missing; initializing ${app_values_dir} from packaged values ${packaged_values_file}"
+  mkdir -p "$app_values_dir"
+  cp -f "$packaged_values_file" "${app_values_dir}/storage-manager-values.yaml"
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -135,7 +100,7 @@ HELM_OPTS=${HELM_OPTS:-""}
 
 load_cloud_tools_or_exit
 
-for cmd in helm kubectl find sort mkdir cp tr; do
+for cmd in helm kubectl find sort mkdir cp; do
   command -v "$cmd" >/dev/null 2>&1 || error "missing required command: ${cmd}"
 done
 
@@ -159,11 +124,14 @@ SEALOS_DISABLE_HTTPS="${SEALOS_DISABLE_HTTPS:-}"
 if [ -z "$SEALOS_DISABLE_HTTPS" ]; then
   SEALOS_DISABLE_HTTPS="$(get_cm_value "$SEALOS_SYSTEM_NS" "$SEALOS_CONFIG_CM" disableHttps 1 0)"
 fi
-if truthy "$SEALOS_DISABLE_HTTPS"; then
+export SEALOS_CLOUD_PORT SEALOS_HTTP_PORT SEALOS_DISABLE_HTTPS
+
+if global_http_disable_https; then
   SEALOS_DISABLE_HTTPS="true"
 else
   SEALOS_DISABLE_HTTPS="false"
 fi
+export SEALOS_DISABLE_HTTPS
 
 SEALOS_CERT_SECRET_NAME="${SEALOS_CERT_SECRET_NAME:-}"
 if [ -z "$SEALOS_CERT_SECRET_NAME" ]; then
@@ -171,11 +139,9 @@ if [ -z "$SEALOS_CERT_SECRET_NAME" ]; then
 fi
 SEALOS_CERT_SECRET_NAME="${SEALOS_CERT_SECRET_NAME:-wildcard-cert}"
 
-export SEALOS_CLOUD_PORT SEALOS_HTTP_PORT SEALOS_DISABLE_HTTPS
-
 WEB_HOST="${WEB_HOST:-storage-manager.${CLOUD_DOMAIN}}"
-WEB_URL="$(external_url "$WEB_HOST")"
-EFFECTIVE_PORT="$(effective_port)"
+WEB_URL="$(global_http_external_url "$WEB_HOST")"
+EFFECTIVE_PORT="$(global_http_effective_port)"
 
 sync_packaged_app_values "$PACKAGED_APP_VALUES_FILE" "$APP_VALUES_DIR"
 
